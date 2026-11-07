@@ -23,7 +23,7 @@ function createFakeStalwart() {
         mailboxes,
 
         /** Put a message in a mailbox, as if it had arrived; the first header is the server's own stamp. */
-        deliver({ mailboxAddress, to, from = 'tester@example.net', subject = 'Hello', text = '', html = '', receivedAt = null, headers = [] }) {
+        deliver({ mailboxAddress, to, from = 'tester@example.net', subject = 'Hello', text = '', html = '', receivedAt = null, headers = [], attachments = [] }) {
             counter += 1;
             const message = {
                 id: `m${counter}`,
@@ -37,6 +37,7 @@ function createFakeStalwart() {
                     { name: 'Delivered-To', value: ` ${String(to).toLowerCase()}` },
                     ...headers,
                 ],
+                attachments,
             };
             mailbox(mailboxAddress).push(message);
             return message;
@@ -78,6 +79,45 @@ function createFakeStalwart() {
             const message = all.find((m) => m.id === id);
             if (!message) return { text: '', html: '' };
             return { text: message.text, html: message.html };
+        },
+
+        // ---- reading (M1.5): the same rules as the real client (server/stalwart/client.js) ----
+        async readMessages({ mailboxAddress, recipient = null, position = 0, limit = 50 }) {
+            const all = [...(mailboxes.get(String(mailboxAddress || '').toLowerCase()) || [])].reverse();
+            const wanted = recipient ? String(recipient).trim().toLowerCase() : null;
+            const stamped = (m) => { const f = (m.headers || []).find((h) => String(h && h.name || '').toLowerCase() === 'delivered-to'); return f ? String(f.value || '').trim().toLowerCase() : null; };
+            const picked = [];
+            let used = 0;
+            for (const m of all.slice(position)) {
+                used += 1;
+                if (wanted && stamped(m) !== wanted) continue;
+                picked.push({ id: m.id, from: m.from.map((a) => a.email), to: [stamped(m)], subject: m.subject, receivedAt: m.receivedAt, unread: !m.seen, hasAttachment: Boolean((m.attachments || []).length), spam: false });
+                if (picked.length >= limit) break;
+            }
+            return { messages: picked, next: position + used < all.length ? position + used : null };
+        },
+        async readMessage({ mailboxAddress, id }) {
+            const m = (mailboxes.get(String(mailboxAddress || '').toLowerCase()) || []).find((x) => x.id === id && !x.trashed);
+            if (!m) return null;
+            return { id: m.id, from: m.from.map((a) => a.email), to: m.to.map((a) => a.email), cc: [], subject: m.subject, date: m.receivedAt, unread: !m.seen, text: m.text || '', html: m.html || '',
+                attachments: (m.attachments || []).map((a) => ({ part: a.part, blobId: `b-${a.part}`, name: a.name, type: a.type, size: a.bytes.length })) };
+        },
+        async readAttachment({ mailboxAddress, id, part }) {
+            const m = (mailboxes.get(String(mailboxAddress || '').toLowerCase()) || []).find((x) => x.id === id && !x.trashed);
+            const a = m && (m.attachments || []).find((x) => x.part === String(part));
+            return a ? { name: a.name, type: a.type, bytes: a.bytes } : null;
+        },
+        async setSeen({ mailboxAddress, id, seen }) {
+            const m = (mailboxes.get(String(mailboxAddress || '').toLowerCase()) || []).find((x) => x.id === id && !x.trashed);
+            if (!m) return false;
+            m.seen = Boolean(seen);
+            return true;
+        },
+        async trashMessage({ mailboxAddress, id }) {
+            const m = (mailboxes.get(String(mailboxAddress || '').toLowerCase()) || []).find((x) => x.id === id && !x.trashed);
+            if (!m) return false;
+            m.trashed = true;
+            return true;
         },
 
         async deleteMessages({ mailboxAddress, ids }) {

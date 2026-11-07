@@ -393,3 +393,38 @@ test('a ten-minute burner works without an account, read with its token', async 
     const without = await call('GET', `/api/v1/burners/${made.body.burner.id}/code`);
     assert.strictEqual(without.status, 404, 'the burner is not readable without its token');
 });
+
+test('reading your own mail (M1.5): a mask\'s HTML arrives cleaned, and it is marked and trashed', async () => {
+    const reader = network.addUser('reader');
+    const other = network.addUser('other-reader');
+    const mask = (await call('POST', '/api/v1/masks', { as: reader, json: { label: 'shoes' } })).body.mask;
+    await call('POST', '/api/v1/masks', { as: other, json: { label: 'other' } });
+    await send({
+        port: stalwart.smtpPort, to: mask.address, subject: 'Shipped',
+        html: '<p onclick="x()">On its way<script>steal()</script></p><img src="https://t.example/pixel.gif" alt="logo"><a href="javascript:alert(1)">x</a>',
+    });
+    let list = null;
+    for (let i = 0; i < 40; i++) {
+        list = await call('GET', `/api/v1/me/mail/messages?address=${encodeURIComponent(mask.address)}`, { as: reader });
+        if (list.status === 200 && list.body.messages.length) break;
+        await sleep(250);
+    }
+    assert.strictEqual(list.status, 200, JSON.stringify(list.body));
+    assert.strictEqual(list.body.messages.length, 1, 'the mask has its message');
+    const m = list.body.messages[0];
+    assert.strictEqual(m.subject, 'Shipped');
+    assert.strictEqual(m.unread, true);
+
+    const read = await call('GET', `/api/v1/me/mail/messages/${m.id}`, { as: reader });
+    assert.strictEqual(read.status, 200, JSON.stringify(read.body));
+    assert.ok(read.body.message.html && read.body.message.html.includes('On its way'), 'the html body came back from JMAP');
+    assert.ok(!/script|onclick|javascript:|pixel\.gif/.test(read.body.message.html), read.body.message.html);
+    assert.strictEqual(read.body.message.blocked_images, 1);
+    assert.strictEqual((await call('GET', `/api/v1/me/mail/messages/${m.id}`, { as: other })).status, 404, 'another person');
+
+    assert.strictEqual((await call('POST', `/api/v1/me/mail/messages/${m.id}/read`, { as: reader })).status, 200);
+    const after = await call('GET', `/api/v1/me/mail/messages?address=${encodeURIComponent(mask.address)}`, { as: reader });
+    assert.strictEqual(after.body.messages[0].unread, false, 'seen on the server');
+    assert.strictEqual((await call('DELETE', `/api/v1/me/mail/messages/${m.id}`, { as: reader })).status, 200);
+    assert.ok(!logs.some((l) => /On its way|steal\(\)/.test(String(l))), 'no body in the log');
+});

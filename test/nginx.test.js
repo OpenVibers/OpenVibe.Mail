@@ -37,7 +37,7 @@ test('only the page and its files, the API, the machine answers and the sign-in 
         .filter(([, body]) => /proxy_pass\s+http:\/\/127\.0\.0\.1:5250;/.test(body))
         .map(([name]) => name)
         .sort();
-    assert.deepStrictEqual(proxied, ['/', '^/(css|js|shared)/', '/api/health', '/api/ready', '/api/v1/', '/auth/', '/auth/me', '/release.json'].sort());
+    assert.deepStrictEqual(proxied, ['/', '^/(css|js|shared)/', '^/inbox(/[A-Za-z0-9_-]+)?$', '/api/health', '/api/ready', '/api/v1/', '/auth/', '/auth/me', '/release.json'].sort());
 
     // A proxy anywhere else (a generic /api/ or / catch-all) would expose more than the door above.
     assert.strictEqual((CONF.match(/proxy_pass\s+/g) || []).length, proxied.length,

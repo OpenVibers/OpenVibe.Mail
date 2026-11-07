@@ -6,6 +6,28 @@ M1 is **receive only**: Stalwart Community listens on port 25, the service hands
 OpenVibe mailboxes, and nothing here sends or relays mail. Sending, inbox AI and paid custom domains are M2–M4 in
 the OpenVibe Seven Domains plan (2026-11-07) §8.
 
+## M1.5: read your mail (2026-11-07)
+
+`/inbox` on openvibe.email shows a signed-in person's mailbox and the addresses that deliver into it (masks, agent
+inboxes), for its owner only (another person's message is the same 404 as a missing one):
+
+| Route | What |
+|---|---|
+| `GET /api/v1/me/mail/addresses` | the mailbox and the addresses that deliver into it |
+| `GET /api/v1/me/mail/messages?address=&cursor=` | a page, newest first; an address is matched on the server's `Delivered-To` stamp only |
+| `GET /api/v1/me/mail/messages/:id[?images=1]` | one message: text, and HTML cleaned on the server |
+| `GET /api/v1/me/mail/messages/:id/attachments/:part` | a download (`attachment`, `nosniff`, an allow-listed type or `application/octet-stream`) |
+| `POST …/:id/read`, `…/:id/unread`, `DELETE …/:id` | seen flags; Delete moves it to the Trash |
+
+**Two layers for a sender's HTML.** `server/domain/reading.js` cleans it with
+[sanitize-html](https://github.com/apostrophecms/sanitize-html) (MIT): an allow-list of tags and attributes, `style`
+limited to layout and colour properties whose values can hold no `url()`, `expression()` or `@import`, links only
+http(s)/mailto opening in a new tab with `rel="noopener noreferrer"`. Remote images, the way senders track opening,
+are replaced by their alt text and counted (`blocked_images`) until the person asks (`?images=1`, https only). The
+page (`public/js/inbox.js`) then shows the result in an iframe with no `allow-scripts` and its own CSP
+(`default-src 'none'`). Bodies go to their owner and nowhere else: never a log line, an event or a row
+(`test/reading.test.js` and the Stalwart acceptance test check the logger).
+
 ## What is in M1
 
 | Piece | What it does |

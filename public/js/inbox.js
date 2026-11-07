@@ -273,8 +273,13 @@
     if (m) openMessage(decodeURIComponent(m[1]), false); else { openId = null; showRead(false); paintList(); }
   });
 
-  paintSide();
-  loadList();
+  // The addresses come from the API when the shell does not carry them.
+  function begin() {
+    paintSide();
+    loadList();
+  }
+  if (addresses.length) begin();
+  else api('/api/v1/me/mail/addresses').then(function (b) { addresses = b.addresses || []; begin(); }).catch(function () { begin(); });
   var start = /^\/inbox\/([^/]+)$/.exec(location.pathname);
   if (start) openMessage(decodeURIComponent(start[1]), false);
   else if (readEl) { readEl.textContent = ''; readEl.appendChild(el('p', 'ib-quiet ib-pick', 'Pick a message to read it here.')); }
