@@ -54,3 +54,6 @@
 .ml-h2 { margin: 0 0 10px; font-size: 1.05rem; }
 .ml-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 @media (prefers-reduced-motion: reduce) { .ml-btn { transition: none; } }
+
+.ml-card-link { font-weight: 750; color: var(--accent, #3b82f6); text-decoration: none; }
+.ml-card-link:hover, .ml-card-link:focus-visible { text-decoration: underline; }

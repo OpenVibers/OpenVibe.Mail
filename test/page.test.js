@@ -24,8 +24,10 @@ test('/ is the page: the ten-minute address, the honest cards, the navbar, a str
     for (const marker of ['data-mail-burner', 'Get a 10-minute address', 'data-mail-mine', 'Inboxes for your agents', 'navbar-mount', '/shared/']) {
         assert.ok(r.text.includes(marker), marker);
     }
-    // Masks and own inboxes are not offered as if they worked today: each card says Later.
-    assert.strictEqual((r.text.match(/class="ml-soon">Later</g) || []).length, 2);
+    // Masks and the inbox work since M1.5: no card says Later, and both lead to /inbox; sending is said to come next.
+    assert.strictEqual((r.text.match(/class="ml-soon">Later</g) || []).length, 0);
+    assert.strictEqual((r.text.match(/href="\/inbox"/g) || []).length, 2);
+    assert.match(r.text, /Sending and your own domain come next/);
     assert.doesNotMatch(r.text, /<form[^>]*action="\/api/, 'nothing posts to the API without the script');
     const csp = r.headers.get('content-security-policy') || '';
     assert.match(csp, /frame-ancestors 'none'/);
