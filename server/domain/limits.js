@@ -28,6 +28,18 @@ async function countLiveBurners(t, ownerSubject) {
     return row ? row.n : 0;
 }
 
+/**
+ * Serialize the anonymous-burner cap. A count alone is a soft cap: two requests can both read 1999 and both insert.
+ * This row lock is held until the transaction commits, so the count and the insert that follows it are one decision.
+ */
+async function lockAnonBurners(t) {
+    await t.exec(sql`
+        INSERT INTO mail_settings (key, value, updated_at)
+        VALUES ('anon_burner_lock', '0', now())
+        ON CONFLICT (key) DO NOTHING`);
+    await t.one(sql`SELECT value FROM mail_settings WHERE key = 'anon_burner_lock' FOR UPDATE`);
+}
+
 /** The anonymous burners alive right now: the global ceiling in front of the per-IP limit. */
 async function countLiveAnonBurners(t) {
     const row = await t.maybe(sql`
@@ -79,4 +91,4 @@ async function staleCounters(t, { windowMs = HOUR_MS } = {}) {
          WHERE window_started_at < now() - (${windowMs} * interval '1 millisecond')`);
 }
 
-module.exports = { HOUR_MS, countMasks, countLiveBurners, countLiveAnonBurners, bump, burnersLeft, staleCounters };
+module.exports = { HOUR_MS, countMasks, countLiveBurners, countLiveAnonBurners, lockAnonBurners, bump, burnersLeft, staleCounters };

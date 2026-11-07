@@ -1,9 +1,9 @@
 -- phase: expand
 -- OpenVibe.Mail — the service's own settings, and the events outbox.
 --
--- The settings table is small service state. It holds the purge job's lease today; the old burner-pool mailbox
--- setting is gone because every burner is its own Stalwart directory account and the purge job reads that account
--- directly.
+-- The settings table is small service state. It holds the purge job's lease and the row that serializes the
+-- anonymous-burner cap; the old burner-pool mailbox setting is gone because every burner is its own Stalwart
+-- directory account and the purge job reads that account directly.
 
 CREATE TABLE IF NOT EXISTS mail_settings (
     key         text PRIMARY KEY,

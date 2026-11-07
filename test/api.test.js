@@ -311,6 +311,20 @@ test('the global anonymous-burner cap answers 503 with a clear code', async (t) 
     assert.strictEqual(over.body.code, 'mail.burner_capacity');
 });
 
+test('the global cap holds when two account-less burners race for the last slot', async (t) => {
+    const s = await boot({ env: {
+        MAIL_MAX_LIVE_ANON_BURNERS: '1',
+        MAIL_BURNERS_PER_IP_HOUR: '100',
+    } });
+    t.after(() => s.close());
+
+    const [first, second] = await Promise.all([
+        s.post('/api/v1/burners', { json: { expires: '10m' } }),
+        s.post('/api/v1/burners', { json: { expires: '10m' } }),
+    ]);
+    assert.deepStrictEqual([first.status, second.status].sort(), [201, 503]);
+});
+
 test('anonymous burners are limited per IP as well as globally', async (t) => {
     const s = await boot({ env: {
         MAIL_MAX_LIVE_ANON_BURNERS: '100',

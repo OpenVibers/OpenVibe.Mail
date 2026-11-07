@@ -19,7 +19,7 @@ const { sql } = require('openvibe-sdk/db');
 const { ids } = require('openvibe-contracts');
 const { burnerAddress } = require('./addresses');
 const { ensureOwnerMailbox } = require('./mailboxes');
-const { countLiveBurners, countLiveAnonBurners, bump } = require('./limits');
+const { countLiveBurners, countLiveAnonBurners, lockAnonBurners, bump } = require('./limits');
 const { listForAddress, observe } = require('./messages');
 const { extractCode } = require('../stalwart/code');
 
@@ -95,6 +95,7 @@ async function createBurner({
         } else {
             // A global ceiling first, so one person or a botnet cannot fill the database with live anonymous rows;
             // then the per-IP creation limit.
+            await lockAnonBurners(t);
             const liveAnon = await countLiveAnonBurners(t);
             if (liveAnon >= config.limits.maxLiveAnonBurners) {
                 const err = new Error('the anonymous burner capacity is full; try again later');
