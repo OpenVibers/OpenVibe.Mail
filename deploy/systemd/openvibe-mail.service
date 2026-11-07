@@ -10,8 +10,10 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=openvibe
-Group=openvibe
+# The house user, like every other service: ovhost keeps /opt/openvibe.mail ubuntu-owned (0750). openvibe is
+# Stalwart's own system user, and the Node service never needs it (found at the install, 11-07: status=200/CHDIR).
+User=ubuntu
+Group=ubuntu
 EnvironmentFile=/etc/openvibe/mail.env
 WorkingDirectory=/opt/openvibe.mail
 ExecStart=/usr/bin/node server/index.js
