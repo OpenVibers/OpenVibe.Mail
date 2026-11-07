@@ -139,10 +139,13 @@ store from its database. The Network client secret is needed by the sign-in exch
 ```sh
 sudo sh -c 'set -a; . /etc/openvibe/stalwart.env; set +a; \
   STALWART_RENDER_DIR=/etc/openvibe/stalwart node deploy/stalwart/render.js'
-sudo chown root:openvibe /etc/openvibe/stalwart/config.json /etc/openvibe/stalwart/plan.json
-sudo chmod 0640 /etc/openvibe/stalwart/config.json
-sudo chmod 0600 /etc/openvibe/stalwart/plan.json
+sudo chown root:root /etc/openvibe/stalwart/config.json /etc/openvibe/stalwart/plan.json
+sudo chmod 0600 /etc/openvibe/stalwart/config.json /etc/openvibe/stalwart/plan.json
 ```
+
+`/etc/openvibe` is root-only (0700) and stays so: Stalwart never opens a file there itself. systemd reads
+`config.json` as root and hands it to the service privately (`LoadCredential=` in the unit, `%d/config.json`), and
+reads `stalwart.env` as root too (`EnvironmentFile=`).
 
 `config.json` is the small data-store file Stalwart v1.0.3 reads; its password is an environment variable
 reference, not a value. `plan.json` is the JMAP reconciliation plan and contains no secret.
@@ -154,7 +157,8 @@ POP3, Sieve and HTTPS listeners before they ever open.
 
 Use the same password after `admin:` here and as `STALWART_ADMIN_PASSWORD` in `mail.env`: the Node service reads mail with it.
 
-Create a one-time recovery env file (root:openvibe, 0640) so the admin password is never on a command line:
+Create a one-time recovery env file (root-only, 0600) so the admin password is never on a command line; systemd
+reads it as root, like the unit's own env file:
 
 ```sh
 sudo sh -c 'umask 027; cat > /etc/openvibe/stalwart-recovery.env <<EOF
@@ -163,11 +167,12 @@ STALWART_RECOVERY_ADMIN=admin:REPLACE_WITH_A_LONG_ADMIN_PASSWORD
 STALWART_RECOVERY_MODE=1
 STALWART_RECOVERY_MODE_PORT=18080
 EOF'
-sudo chown root:openvibe /etc/openvibe/stalwart-recovery.env
-sudo chmod 0640 /etc/openvibe/stalwart-recovery.env
-sudo -u openvibe sh -c 'set -a; . /etc/openvibe/stalwart-recovery.env; set +a; \
-  exec /opt/openvibe.stalwart/stalwart --config /etc/openvibe/stalwart/config.json' &
-echo $! > /tmp/stalwart-recovery.pid
+sudo chmod 0600 /etc/openvibe/stalwart-recovery.env
+sudo systemd-run --unit=openvibe-stalwart-recovery --uid=openvibe --gid=openvibe \
+  -p EnvironmentFile=/etc/openvibe/stalwart-recovery.env \
+  -p LoadCredential=config.json:/etc/openvibe/stalwart/config.json \
+  -p StateDirectory=openvibe-stalwart \
+  /bin/sh -c 'exec /opt/openvibe.stalwart/stalwart --config "$CREDENTIALS_DIRECTORY/config.json"'
 ```
 
 Wait until `ss -ltn | grep 18080` shows the recovery listener, then apply:
@@ -175,8 +180,8 @@ Wait until `ss -ltn | grep 18080` shows the recovery listener, then apply:
 ```sh
 sudo sh -c 'set -a; . /etc/openvibe/stalwart.env; . /etc/openvibe/mail.env; set +a; \
   STALWART_URL=http://127.0.0.1:18080 node deploy/stalwart/apply.js --plan /etc/openvibe/stalwart/plan.json'
-kill "$(cat /tmp/stalwart-recovery.pid)"
-rm -f /etc/openvibe/stalwart-recovery.env
+sudo systemctl stop openvibe-stalwart-recovery
+sudo rm -f /etc/openvibe/stalwart-recovery.env
 ```
 
 The first pass creates the SQL directory, the domains, the local Filesystem blob store, the spam setting and the
