@@ -1,0 +1,72 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: unit and Stalwart acceptance
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: ov
+          POSTGRES_PASSWORD: ov-ci-password
+          POSTGRES_DB: ov_mail
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ov -d ov_mail"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
+      minio:
+        image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+        env:
+          MINIO_ROOT_USER: ovminio
+          MINIO_ROOT_PASSWORD: ovminiopw
+        ports:
+          - 9000:9000
+        options: >-
+          --health-cmd "curl -fsS http://localhost:9000/minio/health/live"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.1
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: syntax
+        run: |
+          find server scripts test deploy -name '*.js' -not -path '*/node_modules/*' -print0 \
+            | xargs -0 -n1 node --check
+      - name: unit tests (PGlite, no services)
+        run: npm test
+      - name: download the pinned Stalwart (sha256 verified)
+        run: node scripts/fetch-stalwart.js
+      - name: Stalwart acceptance (PostgreSQL + MinIO + real SMTP)
+        env:
+          STALWART_BIN: ${{ github.workspace }}/.cache/stalwart/stalwart
+          STALWART_DB_HOST: 127.0.0.1
+          STALWART_DB_PORT: 5432
+          STALWART_DB_USER: ov
+          STALWART_DB_PASSWORD: ov-ci-password
+          STALWART_TEST_DB: ov_mail_test
+          STALWART_BLOB_ENDPOINT: http://127.0.0.1:9000
+          STALWART_BLOB_BUCKET: ov-mail
+          STALWART_BLOB_REGION: us-east-1
+          STALWART_BLOB_ACCESS_KEY_ID: ovminio
+          STALWART_BLOB_SECRET_KEY: ovminiopw
+        run: npm run test:stalwart
+
+  security:
+    uses: OpenVibers/OpenVibe.Shared/.github/workflows/security.yml@0b2e948382434baa6447459ff92914392958d524

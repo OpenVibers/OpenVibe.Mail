@@ -1,0 +1,73 @@
+# OpenVibe.Mail — Stalwart Community, M1: receive only.
+#
+# Stalwart v0.16 and later deliberately stopped reading TOML (see UPGRADING/v0_16.md in the pinned release): the
+# server reads one small config.json that names its data store, and keeps every other setting as a JMAP object.
+# This file is therefore our source of truth, not Stalwart's:
+#
+#   node deploy/stalwart/render.js   → rendered/config.json  (the data store Stalwart reads at boot)
+#                                     → rendered/plan.json    (directory, domains, blob store, spam, listeners)
+#   node deploy/stalwart/apply.js    reconciles plan.json over loopback JMAP
+#
+# An STALWART_* environment variable overrides the matching value at render time; secrets are named here and
+# resolved by apply.js, never written to a rendered file.
+
+[server]
+default_hostname = "mail.openvibe.email"
+
+[domains]
+# MAIL_BASE_DOMAIN, MAIL_MASK_DOMAIN and BURNER_DOMAINS override these, so the mail server and the service always
+# agree about the addresses they hand out. A new burner domain is a configuration change, never a code change.
+base = "openvibe.email"
+mask = "mask.openvibe.email"
+burners = ["burn1.openvibe.email", "burn2.openvibe.email", "burn3.openvibe.email"]
+
+[data_store]
+kind = "postgresql"
+host = "127.0.0.1"
+port = 5432
+database = "ov_mail"
+user = "ov_mail"
+# The password is an EnvironmentVariable reference in rendered/config.json, not a value in it.
+password_env = "STALWART_DB_PASSWORD"
+ssl = false
+pool_max_connections = 20
+
+[blob_store]
+# B2 in production (an S3-compatible endpoint), MinIO in CI. The endpoint is a custom S3 region to Stalwart.
+kind = "s3"
+endpoint = "https://s3.eu-central-003.backblazeb2.com"
+bucket = "openvibe-mail"
+region = "eu-central-003"
+access_key_id_env = "STALWART_BLOB_ACCESS_KEY_ID"
+secret_key_env = "STALWART_BLOB_SECRET_KEY"
+allow_invalid_certs = false
+verify_after_write = true
+timeout_ms = 30000
+max_retries = 3
+key_prefix = ""
+
+[directory]
+# Stalwart asks these three views who owns an address. The view is migrations/0002_directory_views.sql: a mask
+# that is on, a burner that has not expired and an agent inbox all resolve to the owner's mailbox; everything
+# else resolves to no row, and the mail server bounces it.
+description = "OpenVibe mail directory"
+query_recipient = "SELECT name, secret, description FROM mail_directory_accounts WHERE address = $1"
+query_login = "SELECT name, secret, description FROM mail_directory_accounts WHERE name = $1"
+query_member_of = "SELECT NULL::text AS member_of FROM mail_directory_accounts WHERE name = $1 AND false"
+query_email_aliases = "SELECT address FROM mail_directory_accounts WHERE name = $1"
+
+[spam]
+# The built-in filter. M1 receives for real people, so junk is tagged rather than relayed or discarded.
+enabled = true
+score_spam = 5.0
+
+[listeners]
+# SMTP accepts inbound mail on 25. There is deliberately no submission listener (587 or 465) and no relay:
+# the domain is created with allowRelaying = false and no authenticated SMTP path exists.
+smtp_bind = "0.0.0.0"
+smtp_port = 25
+# JMAP (and the management API) is loopback only; so is IMAP. The Node service is the only JMAP client for M1.
+http_bind = "127.0.0.1"
+http_port = 8080
+imap_bind = "127.0.0.1"
+imap_port = 143

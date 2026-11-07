@@ -1,0 +1,35 @@
+# OpenVibe.Mail — the Node service (API on 127.0.0.1:$PORT).
+#
+# It is a separate unit from Stalwart: the API can restart, migrate and roll back without touching the receiving
+# mail server, and Stalwart keeps its own memory cap. The API is not public: nginx/Network reaches it on loopback.
+[Unit]
+Description=OpenVibe.Mail API (masks, burners, agent inboxes)
+Documentation=https://github.com/OpenVibers/OpenVibe.Mail
+After=network-online.target openvibe-stalwart.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=openvibe
+Group=openvibe
+EnvironmentFile=/etc/openvibe/mail.env
+WorkingDirectory=/opt/openvibe.mail
+ExecStart=/usr/bin/node server/index.js
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=20
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+StateDirectory=openvibe-mail
+ReadWritePaths=/var/lib/openvibe-mail
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=true
+SystemCallArchitectures=native
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

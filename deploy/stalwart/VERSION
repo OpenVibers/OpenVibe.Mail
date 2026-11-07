@@ -1,0 +1,6 @@
+# Stalwart Community, pinned. The binary is AGPL-3.0-only; OpenVibe.Mail ships the configuration, not a fork.
+version=1.0.3
+release=https://github.com/stalwartlabs/stalwart/releases/tag/v1.0.3
+asset=stalwart-x86_64-unknown-linux-gnu.tar.gz
+sha256=8ae481ff410cd09dd53d7f49f528dcad35d90b4b2ffb0c49c9ae23aaf43c4831
+url=https://github.com/stalwartlabs/stalwart/releases/download/v1.0.3/stalwart-x86_64-unknown-linux-gnu.tar.gz

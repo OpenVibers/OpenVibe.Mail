@@ -1,0 +1,61 @@
+{
+  "repository": "OpenVibers/OpenVibe.Mail",
+  "stage": "alpha",
+  "code": true,
+  "wave": "M1",
+  "plan": "OpenVibe Seven Domains Plan (2026-11-07) §8, M1: Stalwart receiving, masks, burners and agent inboxes",
+  "runtime": "node 22, express, PostgreSQL 18 (openvibe-sdk/db), Stalwart Community 1.0.3 (AGPL-3.0-only), S3-compatible blobs",
+  "port": 5250,
+  "domain": "openvibe.email; receive-only MX. The API is loopback and has no public site in M1.",
+  "contracts": "openvibe-contracts v0.327.0",
+  "contractsProposed": [
+    "mail.mask@1",
+    "mail.burner@1",
+    "mail.agent-inbox@1",
+    "mail.message-summary@1"
+  ],
+  "sdk": "openvibe-sdk v0.97.1",
+  "shared": "openvibe-shared v4.135.0",
+  "stalwart": {
+    "version": "1.0.3",
+    "asset": "stalwart-x86_64-unknown-linux-gnu.tar.gz",
+    "sha256": "8ae481ff410cd09dd53d7f49f528dcad35d90b4b2ffb0c49c9ae23aaf43c4831",
+    "dataStore": "PostgreSQL (database ov_mail)",
+    "blobStore": "S3-compatible (Backblaze B2 in production, MinIO in CI)",
+    "listeners": "SMTP 25 inbound; JMAP/management 8080 and IMAP 143 on loopback; no submission, POP3, Sieve or HTTPS listener",
+    "spamFilter": "built-in, on",
+    "directory": "SQL over mail_directory_accounts (mailbox, masks, burners, agent inboxes)"
+  },
+  "capabilities": [],
+  "capabilitiesRegistered": false,
+  "eventsProduced": [
+    "mail.mask.created",
+    "mail.received"
+  ],
+  "eventsPayload": "metadata only; mail.received never carries a subject, body or code",
+  "limits": {
+    "masksPerPerson": 20,
+    "liveBurnersPerPerson": 5,
+    "accountlessBurnersPerIpPerHour": 10,
+    "accountlessBurnerTtl": "10m"
+  },
+  "privacy": [
+    "message bodies are never logged, stored by this service, or put in an event",
+    "a mask never forwards outside OpenVibe",
+    "the code extractor is the only reader of a body and drops it immediately",
+    "an expired burner's mail is deleted by a due-based purge job; a failure keeps the row for the next run"
+  ],
+  "tests": {
+    "unit": "node test/run.js (PGlite, in-process Network and mail server)",
+    "postgres": "MAIL_TEST_STORE=pg node test/run.js",
+    "acceptance": "node test/stalwart/run.js (pinned Stalwart + PostgreSQL + MinIO; SMTP delivery, code, expiry bounce, disabled-mask bounce, 404s, no body in logs)"
+  },
+  "deployed": false,
+  "deployment": "M1 is deliberately not deployed by this job. Opus installs it on the host; docs/INSTALL.md has the steps and docs/DNS.md the records.",
+  "security": [
+    "the API is behind OpenVibe.Network auth; typed tokens are refused",
+    "someone else's address is 404, never 403",
+    "Stalwart runs in its own systemd slice: MemoryMax=1G, CPUQuota=100%, NoNewPrivileges, ProtectSystem=strict",
+    "the mail server has no password-authenticated listener and no relay: domains are allowRelaying=false and the submission/POP3/Sieve/HTTPS listeners are removed"
+  ]
+}
