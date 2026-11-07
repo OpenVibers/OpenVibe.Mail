@@ -13,9 +13,10 @@ Description=OpenVibe.Mail Stalwart (receive-only SMTP; JMAP/IMAP on loopback)
 Documentation=https://github.com/OpenVibers/OpenVibe.Mail
 After=network-online.target postgresql.service
 Wants=network-online.target
-Slice=openvibe-stalwart.slice
 
 [Service]
+# Slice= belongs here, not in [Unit] (systemd ignored it there: found at the install, 11-07).
+Slice=openvibe-stalwart.slice
 Type=simple
 User=openvibe
 Group=openvibe
