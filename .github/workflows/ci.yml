@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -69,4 +70,4 @@ jobs:
         run: npm run test:stalwart
 
   security:
-    uses: OpenVibers/OpenVibe.Shared/.github/workflows/security.yml@0b2e948382434baa6447459ff92914392958d524
+    uses: OpenVibers/OpenVibe.Shared/.github/workflows/security.yml@423fe519b5fe9594cc81b670e5ba5cb9f21f6176
