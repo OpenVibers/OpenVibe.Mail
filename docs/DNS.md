@@ -23,7 +23,12 @@ name.
 sending, replace it with the sending hosts and keep `-all`; do not weaken DMARC to `p=none` for convenience.
 
 `rua` needs a mailbox that exists. Provision `dmarc@openvibe.email` before publishing, or point `rua` at an
-address the owner already reads. A report address that bounces loses the reports.
+address the owner already reads. A report address that bounces loses the reports. Production (2026-11-07) publishes
+the DMARC records **without** `rua` (`v=DMARC1; p=reject; adkim=s; aspf=s`) until that mailbox exists; add it then.
+
+Published 2026-11-07 (Cloudflare, all TTL 300): `mail.openvibe.email` A (DNS only, the host's IPv4; no AAAA, since
+Stalwart listens on IPv4 only), MX 10 on `openvibe.email`, `mask.openvibe.email` and `burn1`–`burn3`, and SPF
+`-all` plus DMARC reject on each of those subdomains. The apex already had SPF `-all`, DMARC reject and CAA.
 
 ### `mask.openvibe.email` (site masks)
 

@@ -32,6 +32,7 @@ const { createEvents } = require('./events');
 const { createSsoClient } = require('openvibe-sdk/sso');
 
 const VERSION = require('../package.json').version;
+const ROOT = require('path').join(__dirname, '..');
 
 /**
  * opts: config, store, stalwart, events, now (clock), fetchImpl (Network), log.
@@ -80,6 +81,10 @@ async function createApp(opts = {}) {
 
     const readiness = createServiceReadiness({ db: store.db, config, stalwart, version: VERSION });
     app.get('/api/ready', readiness.handler);
+
+    // GET /release.json (registry.release-manifest@1): the deployed commit, read at boot. Open tabs poll it through
+    // the shared navbar's release-watch and pick up a new release without a hard refresh, as on every other site.
+    require('openvibe-shared/release').createRelease({ service: 'mail', root: ROOT }).mount(app);
 
     // Sign-in with OpenVibe.Network (openvibe-sdk/sso): /auth/login, /auth/callback, /auth/me, /auth/logout. The
     // session lives in the SDK's host-only ov_token cookie on openvibe.email. A request that already carries a
