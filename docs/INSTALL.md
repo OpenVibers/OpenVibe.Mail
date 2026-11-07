@@ -47,8 +47,8 @@ the service's migrations create `mail_*` and the directory view. They share the 
   address and the address is listed by `queryEmailAliases`. The service matches each message against the **first**
   `Delivered-To` header — the one Stalwart stamps at delivery — never against a sender-written To, Cc or
   Delivered-To.
-- There is **no pool mailbox**; a burner's account is the isolation boundary. The only `mail_settings` row left is
-  the purge lease.
+- There is **no pool mailbox**; a burner's account is the isolation boundary. `mail_settings` holds the purge
+  lease and the row that serializes the anonymous-burner cap.
 - A disabled mask, an expired burner and a burner that took its one message resolve to no row, so the mail server
   refuses the address.
 

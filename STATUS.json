@@ -3,7 +3,7 @@
   "stage": "alpha",
   "code": true,
   "wave": "M1",
-  "plan": "OpenVibe Seven Domains Plan (2026-11-07) \u00a78, M1: Stalwart receiving, masks, burners and agent inboxes",
+  "plan": "OpenVibe Seven Domains Plan (2026-11-07) §8, M1: Stalwart receiving, masks, burners and agent inboxes",
   "runtime": "node 22, express, PostgreSQL 18 (openvibe-sdk/db), Stalwart Community 1.0.3 (AGPL-3.0-only), S3-compatible blobs",
   "port": 5250,
   "domain": "openvibe.email; receive-only MX. The API is loopback and has no public site in M1.",
