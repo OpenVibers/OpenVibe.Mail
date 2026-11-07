@@ -206,7 +206,7 @@ sudo systemctl enable --now openvibe-mail.service
 ```
 
 `deploy/init-db.js` runs the migrations through `DATABASE_DIRECT_URL`; the service would also do it at boot, but a
-failure here is easier to read. The service creates the pool mailbox and adds the domains it knows on start.
+failure here is easier to read. The service adds the domains it knows on start; there is no pool mailbox.
 
 ## 9. DNS
 
