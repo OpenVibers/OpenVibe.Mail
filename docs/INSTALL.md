@@ -118,6 +118,8 @@ reference, not a value. `plan.json` is the JMAP reconciliation plan and contains
 Recovery mode binds one HTTP port and none of the default mail listeners, so the plan can remove the submission,
 POP3, Sieve and HTTPS listeners before they ever open.
 
+Use the same password after `admin:` here and as `STALWART_ADMIN_PASSWORD` in `mail.env`: the Node service reads mail with it.
+
 Create a one-time recovery env file (root:openvibe, 0640) so the admin password is never on a command line:
 
 ```sh
