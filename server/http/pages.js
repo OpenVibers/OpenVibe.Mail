@@ -106,6 +106,47 @@ document.addEventListener('DOMContentLoaded', function () {
     });
 }
 
+/**
+ * The inbox (M1.5): the shell public/js/inbox.js fills from /api/v1/me/mail/*. Its policy differs from the home page's
+ * in one way: a message's frame inherits it, so img-src allows https images, which the frame's own policy keeps off
+ * until the person asks to show them (public/js/inbox.js frameFor).
+ */
+const INBOX_CSP = CSP.replace("img-src 'self' data: https://openvibe.network https://openvibe.media", "img-src 'self' data: https:");
+
+function inboxPage(config) {
+    const base = String(config.baseUrl || 'https://openvibe.email').replace(/\/+$/, '');
+    const nav = {
+        service: SERVICE,
+        apiBase: NETWORK_URL,
+        links: [{ label: 'Home', href: '/' }, { label: 'Inbox', href: '/inbox', active: true }],
+        history: { type: 'page', title: `Inbox · ${SITE_NAME}` },
+        silentLogin: `${base}/auth/login?silent=1&next={url}`,
+        sessionUrl: '/auth/me',
+        loginUrl: '/auth/login?next={path}',
+        logoutUrl: '/auth/logout?next={path}',
+    };
+    return shell.page({
+        name: SITE_NAME,
+        lang: 'en',
+        title: `Inbox · ${SITE_NAME}`,
+        siteName: SITE_NAME,
+        description: 'The mail that came to your mailbox, your masks and your agents.',
+        canonical: `${base}/inbox`,
+        robots: 'noindex, nofollow',
+        home: '/',
+        navLinks: nav.links,
+        navbar: nav,
+        head: `<meta name="referrer" content="no-referrer">
+<link rel="stylesheet" href="${ovServe.url('kit.css')}">
+<link rel="stylesheet" href="${asset('css/inbox.css')}">
+<script src="${asset('js/inbox.js')}" defer></script>`,
+        body: `<div id="navbar-mount"></div>
+<main data-mail-inbox id="main"><section data-mail-addresses aria-label="Your addresses"></section><section data-mail-list aria-label="Messages"></section><section data-mail-read aria-label="The message"></section></main>
+<script type="application/json" id="mail-data">{}</script>
+<script>window.__OV_PAGE = ${JSON.stringify({ navbar: nav }).replace(/</g, '\\u003c')};</script>`,
+    });
+}
+
 /** Mount the page, its files and Shared's. Before the API's 404 handler. */
 function mountPages(app, { config }) {
     app.use('/shared', ovServe.handler());
@@ -117,6 +158,15 @@ function mountPages(app, { config }) {
     app.use('/css', express.static(path.join(PUBLIC_DIR, 'css'), { index: false, redirect: false }));
     app.use('/js', express.static(path.join(PUBLIC_DIR, 'js'), { index: false, redirect: false }));
     app.use(['/css', '/js'], (_req, res) => res.status(404).set('Cache-Control', 'no-store').type('text/plain').send('Not found'));
+    let inbox = null;
+    app.get(['/inbox', '/inbox/:id'], (req, res) => {
+        // A person's own mail: signed in, or sent to sign in and back here. The page is private and never cached.
+        if (!(req.user && req.user.subject_id)) return res.redirect(302, `/auth/login?next=${encodeURIComponent(req.originalUrl || '/inbox')}`);
+        inbox = inbox || inboxPage(config);
+        res.set('Content-Security-Policy', INBOX_CSP);
+        res.set('Cache-Control', 'private, no-store');
+        res.type('html').send(inbox);
+    });
     let html = null;
     app.get('/', (req, res) => {
         html = html || homePage(config);
@@ -126,4 +176,4 @@ function mountPages(app, { config }) {
     });
 }
 
-module.exports = { mountPages, homePage, siteIdentity, CSP, asset };
+module.exports = { mountPages, homePage, inboxPage, siteIdentity, CSP, INBOX_CSP, asset };

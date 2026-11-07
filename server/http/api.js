@@ -267,6 +267,9 @@ function createApi({ db, config, stalwart, events, principal, log = console }) {
         return res.json({ messages });
     }));
 
+    // Reading your own mail (M1.5): server/http/reading-routes.js.
+    require('./reading-routes').mountReading(router, { db, stalwart, principal, wrap, fail, ownerOf });
+
     return router;
 }
 

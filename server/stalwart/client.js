@@ -296,11 +296,128 @@ function createStalwartClient({ config, fetchImpl = globalThis.fetch, log = cons
         return got.list || [];
     }
 
+    // ---- reading your own mail (M1.5): the owner's page asks, the answer goes to them and is not kept ----
+
+    const READ_LIST_PROPS = ['id', 'from', 'to', 'subject', 'receivedAt', 'keywords', 'hasAttachment', 'headers'];
+
+    /**
+     * A page of the person's mailbox, newest first. `recipient` keeps the messages the server stamped for one of their
+     * addresses (a mask or an agent inbox); without it, every message in the mailbox. `position` is where the last page
+     * stopped in the mailbox's own order. Answers { messages, next } (next is null at the end).
+     */
+    async function readMessages({ mailboxAddress, recipient = null, position = 0, limit = 50 }) {
+        const accountId = await accountIdFor(mailboxAddress);
+        if (!accountId) return { messages: [], next: null };
+        const wanted = recipient ? String(recipient).trim().toLowerCase() : null;
+        const perPage = Math.min(Math.max(Number(limit) || 50, 1), 100);
+        const scan = wanted ? 500 : perPage;
+        const start = Math.max(0, Math.floor(Number(position) || 0));
+        const queried = await one('Email/query', { accountId, filter: {}, sort: [{ property: 'receivedAt', isAscending: false }], position: start, limit: scan }, 'q');
+        const ids = queried.ids || [];
+        if (!ids.length) return { messages: [], next: null };
+        const got = await one('Email/get', { accountId, ids, properties: READ_LIST_PROPS }, 'e');
+        const byId = new Map((got.list || []).map((m) => [m.id, m]));
+        const messages = [];
+        let used = 0;
+        for (const id of ids) {
+            used += 1;
+            const m = byId.get(id);
+            if (!m) continue;
+            const to = stampedRecipient(m);
+            if (wanted && to !== wanted) continue;
+            messages.push({
+                id: m.id,
+                from: (m.from || []).map((a) => (a.name ? `${a.name} <${a.email}>` : a.email)).filter(Boolean),
+                to: to ? [to] : (m.to || []).map((a) => a.email).filter(Boolean).slice(0, 1),
+                subject: m.subject || null,
+                receivedAt: m.receivedAt || null,
+                unread: !(m.keywords && m.keywords.$seen),
+                hasAttachment: Boolean(m.hasAttachment),
+                spam: Boolean(m.keywords && m.keywords.$junk),
+            });
+            if (messages.length >= perPage) break;
+        }
+        const more = used < ids.length || ids.length === scan;
+        return { messages, next: more ? start + used : null };
+    }
+
+    /**
+     * One message for its owner to read: headers that matter, the text and HTML bodies (each at most 1 MB, raw: the
+     * caller cleans the HTML), and the attachments (part id, name, type, size). Null when it is not in that mailbox.
+     */
+    async function readMessage({ mailboxAddress, id }) {
+        const accountId = await accountIdFor(mailboxAddress);
+        if (!accountId) return null;
+        const got = await one('Email/get', {
+            accountId, ids: [id],
+            properties: ['id', 'from', 'to', 'cc', 'subject', 'receivedAt', 'sentAt', 'keywords', 'textBody', 'htmlBody', 'attachments', 'bodyValues'],
+            fetchTextBodyValues: true, fetchHTMLBodyValues: true, maxBodyValueBytes: 1024 * 1024,
+        }, 'e');
+        const m = (got.list || [])[0];
+        if (!m) return null;
+        const values = m.bodyValues || {};
+        const join = (parts, html) => (parts || [])
+            .filter((p) => p && values[p.partId] && (html ? String(p.type || '').toLowerCase() === 'text/html' : String(p.type || '').toLowerCase() !== 'text/html'))
+            .map((p) => values[p.partId].value).join('\n');
+        const addr = (list) => (list || []).map((a) => (a.name ? `${a.name} <${a.email}>` : a.email)).filter(Boolean);
+        return {
+            id: m.id,
+            from: addr(m.from), to: addr(m.to), cc: addr(m.cc),
+            subject: m.subject || null,
+            date: m.sentAt || m.receivedAt || null,
+            unread: !(m.keywords && m.keywords.$seen),
+            text: join(m.textBody, false),
+            html: join(m.htmlBody, true),
+            attachments: (m.attachments || []).filter((a) => a && a.blobId).map((a) => ({ part: String(a.partId || a.blobId), blobId: a.blobId, name: a.name || null, type: a.type || null, size: Number(a.size) || 0 })),
+        };
+    }
+
+    /** An attachment's bytes, when that part belongs to that message in that mailbox; null otherwise. */
+    async function readAttachment({ mailboxAddress, id, part, maxBytes = 25 * 1024 * 1024 }) {
+        const message = await readMessage({ mailboxAddress, id });
+        if (!message) return null;
+        const att = message.attachments.find((a) => a.part === String(part));
+        if (!att) return null;
+        if (att.size > maxBytes) throw new StalwartError('the attachment is too large to download here', { status: 413, code: 'mail.attachment_too_large' });
+        const accountId = await accountIdFor(mailboxAddress);
+        const blobs = await one('Blob/get', { accountId, ids: [att.blobId], properties: ['data:asBase64', 'size'] }, 'b');
+        const blob = (blobs.list || [])[0];
+        if (!blob || typeof blob['data:asBase64'] !== 'string') return null;
+        return { name: att.name, type: att.type, bytes: Buffer.from(blob['data:asBase64'], 'base64') };
+    }
+
+    /** Read or unread, on the person's own message. */
+    async function setSeen({ mailboxAddress, id, seen }) {
+        const accountId = await accountIdFor(mailboxAddress);
+        if (!accountId) return false;
+        const result = await one('Email/set', { accountId, update: { [id]: { 'keywords/$seen': seen ? true : null } } }, 's');
+        return Boolean(result.updated && Object.prototype.hasOwnProperty.call(result.updated, id));
+    }
+
+    /** Move a message to the mailbox's Trash (Stalwart expunges it after its retention); false when it is not there. */
+    async function trashMessage({ mailboxAddress, id }) {
+        const accountId = await accountIdFor(mailboxAddress);
+        if (!accountId) return false;
+        const boxes = await one('Mailbox/query', { accountId, filter: { role: 'trash' } }, 'm');
+        const trash = (boxes.ids || [])[0];
+        if (!trash) {
+            const result = await one('Email/set', { accountId, destroy: [id] }, 's');
+            return (result.destroyed || []).includes(id);
+        }
+        const result = await one('Email/set', { accountId, update: { [id]: { mailboxIds: { [trash]: true } } } }, 's');
+        return Boolean(result.updated && Object.prototype.hasOwnProperty.call(result.updated, id));
+    }
+
     return {
         jmap,
         one,
         accountIdFor,
         listMessages,
+        readMessages,
+        readMessage,
+        readAttachment,
+        setSeen,
+        trashMessage,
         deleteMessages,
         destroyAccount,
         messageBody,
