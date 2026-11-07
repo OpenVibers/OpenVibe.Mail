@@ -3,10 +3,13 @@
 /**
  * The API of OpenVibe.Mail, v1.
  *
+ *   GET    /api/v1/me/mail                   the person's masks, burners and agent inboxes, with state and counts
+ *
  *   POST   /api/v1/masks                     a mask for the person
  *   GET    /api/v1/masks                     the person's masks
  *   GET    /api/v1/masks/:id                 one mask of the person
- *   DELETE /api/v1/masks/:id                 turn a mask off (it bounces from then on)
+ *   POST   /api/v1/masks/:id/disable         turn a mask off (it bounces from then on)
+ *   DELETE /api/v1/masks/:id                 the same, for a DELETE-shaped client
  *
  *   POST   /api/v1/burners                   a burner (with an account, or the ten-minute one without)
  *   GET    /api/v1/burners                   the person's burners
@@ -30,6 +33,7 @@ const { http } = require('openvibe-contracts');
 const masks = require('../domain/masks');
 const burners = require('../domain/burners');
 const agentInboxes = require('../domain/agent-inboxes');
+const messages = require('../domain/messages');
 
 function createApi({ db, config, stalwart, events, principal, log = console }) {
     const router = express.Router();
@@ -54,6 +58,78 @@ function createApi({ db, config, stalwart, events, principal, log = console }) {
         return http.sendProblem(res, status, code, { detail, ctx: req.ov });
     }
 
+    // ---- the person's front door ---------------------------------------------------------------
+
+    /**
+     * Everything the page draws, in one read: the three kinds of address, each with its state and how many
+     * messages the service has seen for it, plus the totals.
+     *
+     * Every `mask`, `burner` and `agent_inbox` object inside an item is exactly the Contracts resource
+     * (mail.mask@1, mail.burner@1, mail.agent-inbox@1); `state`, `expires_at` (a mask) and `counts` sit beside it.
+     * No message body, subject, sender or code is in this answer.
+     */
+    router.get('/api/v1/me/mail', requirePerson(principal.CAPABILITIES.read), wrap(async (req, res) => {
+        const owner = ownerOf(req);
+        const [maskRows, burnerRows, inboxes] = await Promise.all([
+            masks.listMaskRows({ db, owner }),
+            burners.listBurnerRows({ db, owner }),
+            agentInboxes.listAgentInboxes({ db, owner }),
+        ]);
+        const addresses = [
+            ...maskRows.map((m) => m.address),
+            ...burnerRows.map((b) => b.address),
+            ...inboxes.map((i) => i.address),
+        ];
+        const seen = await messages.countsByAddress({ db, addresses });
+        const countOf = (address) => seen.get(address) || 0;
+        const now = () => Date.now();
+
+        const maskItems = maskRows.map((row) => ({
+            mask: masks.shape(row),
+            address: row.address,
+            purpose: row.purpose || null,
+            state: masks.stateOf(row, now),
+            expires_at: row.expires_at || null,
+            counts: { messages: countOf(row.address) },
+        }));
+        const burnerItems = burnerRows.map((row) => ({
+            burner: burners.shape(row),
+            address: row.address,
+            purpose: null,
+            state: burners.stateOf(row, now),
+            counts: { messages: countOf(row.address) },
+        }));
+        const inboxItems = inboxes.map((inbox) => ({
+            agent_inbox: inbox,
+            address: inbox.address,
+            purpose: null,
+            state: 'active',
+            counts: { messages: countOf(inbox.address) },
+        }));
+
+        return res.json({
+            masks: maskItems,
+            burners: burnerItems,
+            agent_inboxes: inboxItems,
+            counts: {
+                masks: {
+                    total: maskItems.length,
+                    active: maskItems.filter((m) => m.state === 'active').length,
+                    messages: maskItems.reduce((n, m) => n + m.counts.messages, 0),
+                },
+                burners: {
+                    total: burnerItems.length,
+                    live: burnerItems.filter((b) => b.state === 'live').length,
+                    messages: burnerItems.reduce((n, b) => n + b.counts.messages, 0),
+                },
+                agent_inboxes: {
+                    total: inboxItems.length,
+                    messages: inboxItems.reduce((n, i) => n + i.counts.messages, 0),
+                },
+            },
+        });
+    }));
+
     // ---- masks -------------------------------------------------------------------------------
 
     router.post('/api/v1/masks', requirePerson(principal.CAPABILITIES.write), wrap(async (req, res) => {
@@ -67,6 +143,7 @@ function createApi({ db, config, stalwart, events, principal, log = console }) {
                 owner,
                 label: typeof body.label === 'string' ? body.label.slice(0, 120) : null,
                 purpose: typeof body.purpose === 'string' ? body.purpose.slice(0, 120) : null,
+                expiresDays: body.expires_days,
             });
             return res.status(201).json({ mask });
         } catch (err) {
@@ -82,6 +159,12 @@ function createApi({ db, config, stalwart, events, principal, log = console }) {
 
     router.get('/api/v1/masks/:id', requirePerson(principal.CAPABILITIES.read), wrap(async (req, res) => {
         const mask = await masks.findMask({ db, owner: ownerOf(req), id: req.params.id });
+        if (!mask) return fail(req, res, 404, 'mail.not_found', 'That mask does not exist.');
+        return res.json({ mask });
+    }));
+
+    router.post('/api/v1/masks/:id/disable', requirePerson(principal.CAPABILITIES.write), wrap(async (req, res) => {
+        const mask = await masks.disableMask({ db, stalwart, owner: ownerOf(req), id: req.params.id });
         if (!mask) return fail(req, res, 404, 'mail.not_found', 'That mask does not exist.');
         return res.json({ mask });
     }));

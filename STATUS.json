@@ -3,17 +3,12 @@
   "stage": "alpha",
   "code": true,
   "wave": "M1",
-  "plan": "OpenVibe Seven Domains Plan (2026-11-07) §8, M1: Stalwart receiving, masks, burners and agent inboxes",
-  "runtime": "node 22, express, PostgreSQL 18 (openvibe-sdk/db), Stalwart Community 1.0.3 (AGPL-3.0-only), S3-compatible blobs",
+  "plan": "OpenVibe Seven Domains Plan (2026-11-07) \u00a78, M1: Stalwart receiving, masks, burners and agent inboxes",
+  "runtime": "node 22, express, PostgreSQL 18 (openvibe-sdk/db), Stalwart Community 1.0.3 (AGPL-3.0-only), local filesystem blobs (S3 optional)",
   "port": 5250,
-  "domain": "openvibe.email; receive-only MX. The API is loopback and has no public site in M1.",
-  "contracts": "openvibe-contracts v0.327.0",
-  "contractsProposed": [
-    "mail.mask@1",
-    "mail.burner@1",
-    "mail.agent-inbox@1",
-    "mail.message-summary@1"
-  ],
+  "domain": "openvibe.email; receive-only MX. The API is public through nginx (deploy/nginx/openvibe.email.conf); no UI yet.",
+  "contracts": "openvibe-contracts v0.329.0",
+  "contractsProposed": [],
   "sdk": "openvibe-sdk v0.97.1",
   "shared": "openvibe-shared v4.135.0",
   "stalwart": {
@@ -21,7 +16,7 @@
     "asset": "stalwart-x86_64-unknown-linux-gnu.tar.gz",
     "sha256": "8ae481ff410cd09dd53d7f49f528dcad35d90b4b2ffb0c49c9ae23aaf43c4831",
     "dataStore": "PostgreSQL (database ov_mail)",
-    "blobStore": "S3-compatible (Backblaze B2 in production, MinIO in CI)",
+    "blobStore": "local filesystem /var/lib/openvibe-stalwart/blobs by default (STALWART_BLOB_STORE=fs); S3-compatible optional (Backblaze B2 in production, MinIO in CI)",
     "listeners": "SMTP 25 inbound; JMAP/management 8080 and IMAP 143 on loopback; no submission, POP3, Sieve or HTTPS listener",
     "spamFilter": "built-in, on",
     "directory": "SQL over mail_directory_accounts: every burner is its own account (name = burner address); masks and agent inboxes are aliases of the owner's mailbox"
@@ -51,7 +46,8 @@
   "tests": {
     "unit": "node test/run.js (PGlite, in-process Network and mail server)",
     "postgres": "MAIL_TEST_STORE=pg node test/run.js",
-    "acceptance": "node test/stalwart/run.js (pinned Stalwart + PostgreSQL + MinIO; SMTP delivery, code, forged To/Cc/Delivered-To isolation, 300-message isolation, expiry account deletion and bounce, disabled-mask bounce, 404s, no body in logs)"
+    "acceptance": "node test/stalwart/run.js (pinned Stalwart + PostgreSQL, fs blobs by default and one S3 CI run; SMTP delivery, code, forged To/Cc/Delivered-To isolation, 300-message isolation, expiry account deletion and bounce, disabled-mask bounce, 404s, no body in logs, blob on disk)",
+    "frontdoor": "node test/frontdoor.test.js (CORS allow-list, same-site cookie write rule, /me/mail)"
   },
   "deployed": false,
   "deployment": "M1 is deliberately not deployed by this job. Opus installs it on the host; docs/INSTALL.md has the steps and docs/DNS.md the records.",
@@ -59,6 +55,21 @@
     "the API is behind OpenVibe.Network auth; typed tokens are refused",
     "someone else's address is 404, never 403",
     "Stalwart runs in its own systemd slice: MemoryMax=1G, CPUQuota=100%, NoNewPrivileges, ProtectSystem=strict",
-    "the mail server has no password-authenticated listener and no relay: domains are allowRelaying=false and the submission/POP3/Sieve/HTTPS listeners are removed"
-  ]
+    "the mail server has no password-authenticated listener and no relay: domains are allowRelaying=false and the submission/POP3/Sieve/HTTPS listeners are removed",
+    "a cookie-authenticated write must come from openvibe.email (Sec-Fetch-Site/Origin)",
+    "CORS is an exact allow-list from the Contracts manifests; no wildcard and no credentialed cross-origin request"
+  ],
+  "publicApi": {
+    "base": "https://openvibe.email",
+    "paths": [
+      "/api/v1/",
+      "/api/health",
+      "/api/ready",
+      "/auth/"
+    ],
+    "placeholder": "/ answers a placeholder page until the UI lands",
+    "nginx": "deploy/nginx/openvibe.email.conf",
+    "cors": "Bearer from any first-party origin in the Contracts manifests; cookie writes only same-origin on openvibe.email",
+    "trustProxy": 2
+  }
 }

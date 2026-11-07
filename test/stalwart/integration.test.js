@@ -1,7 +1,8 @@
 'use strict';
 
 /**
- * The M1 acceptance test against the real Stalwart binary, PostgreSQL and MinIO.
+ * The M1 acceptance test against the real Stalwart binary and PostgreSQL. Blobs go to a temporary local directory
+ * (M1's fs store); with STALWART_BLOB_STORE=s3 the same run uses MinIO.
  *
  * It is the one place the directory views meet the server that reads them:
  *   * SMTP to a burner lands, and /code returns the code;
@@ -12,9 +13,11 @@
  */
 const test = require('node:test');
 const assert = require('node:assert');
+const fs = require('fs');
 const http = require('http');
 
 const { start, testEnv, waitFor, sleep } = require('./helpers/stalwart');
+const { createClient } = require('../../deploy/stalwart/apply');
 const { ensureDatabase, resetSchema, urlFor } = require('./helpers/pg');
 const { ensureBucket, listKeys } = require('./helpers/s3');
 const { send, sendMany } = require('./helpers/smtp');
@@ -36,6 +39,36 @@ const { openDb, createStore } = require('../../server/db');
 const { createApp } = require('../../server/app');
 const { createStalwartClient } = require('../../server/stalwart/client');
 const { runDue } = require('../../server/jobs/purge');
+
+function blobFiles() {
+    if (!stalwart || !stalwart.blobDir) return 0;
+    let count = 0;
+    for (const entry of fs.readdirSync(stalwart.blobDir, { recursive: true, withFileTypes: true })) {
+        if (entry.isFile()) count += 1;
+    }
+    return count;
+}
+
+/**
+ * Ask the mail server to run its blob purge now. On its normal schedule it runs once a day, so the acceptance test
+ * would otherwise see the message's blob for up to a day after the account is gone.
+ */
+async function purgeBlobs() {
+    const client = createClient({
+        url: stalwart.url,
+        user: stalwart.env.STALWART_ADMIN_USER,
+        password: stalwart.env.STALWART_ADMIN_PASSWORD,
+    });
+    await client.one('x:Task/set', {
+        create: {
+            purge: {
+                '@type': 'StoreMaintenance',
+                maintenanceType: 'purgeBlob',
+                status: { '@type': 'Pending' },
+            },
+        },
+    }, 'pb');
+}
 
 function captureLog() {
     const lines = [];
@@ -92,7 +125,7 @@ async function waitForAgentMessages(id, o = {}) {
 test.before(async () => {
     await ensureDatabase(env);
     await resetSchema(env);
-    ensureBucket();
+    if (String(env.STALWART_BLOB_STORE || 'fs').toLowerCase() === 's3') ensureBucket();
     stalwart = await start({ env });
 
     network = await startNetwork();
@@ -173,7 +206,12 @@ test('SMTP to a burner lands, the code endpoint returns it, and the log has no b
     assert.ok(!('subject' in events[0].envelope.payload), 'mail.received carries no subject');
     assert.ok(!('body' in events[0].envelope.payload), 'mail.received carries no body');
 
-    assert.ok(listKeys().length > 0, 'Stalwart wrote the message into the S3 blob store');
+    if (stalwart.env.STALWART_BLOB_STORE === 's3') {
+        assert.ok(listKeys().length > 0, 'Stalwart wrote the message into the S3 blob store');
+    } else {
+        assert.ok(blobFiles() > 0, 'Stalwart wrote the message onto the local filesystem blob store');
+        assert.match(stalwart.blobDir, /ov-mail-blobs-/);
+    }
 });
 
 test('a burner made for one message stops accepting after the first', async () => {
@@ -252,9 +290,17 @@ test('after expiry the burner bounces and its mail is deleted', async () => {
     await send({ port: stalwart.smtpPort, to: burner.address, subject: 'code', text: 'Your code is 778899' });
     await waitForCode(burner.id, { as: alice });
 
+    const blobsBefore = stalwart.env.STALWART_BLOB_STORE === 's3' ? listKeys().length : blobFiles();
+    assert.ok(blobsBefore > 0, 'the message has a blob before the purge');
+
     await store.db.exec("UPDATE mail_burners SET expires_at = now() - interval '1 second' WHERE id = $1", [burner.id]);
     const report = await runDue({ db: store.db, stalwart: built.ctx.stalwart, events: built.ctx.events, now: () => Date.now() });
     assert.strictEqual(report.expired, 1);
+
+    await purgeBlobs();
+    const blobCount = () => (stalwart.env.STALWART_BLOB_STORE === 's3' ? listKeys().length : blobFiles());
+    await waitFor(async () => blobCount() < blobsBefore, { timeoutMs: 30_000, what: 'the blob purge' });
+    assert.ok(blobCount() < blobsBefore, 'the blob purge removed the burner message blob');
 
     await assert.rejects(
         send({ port: stalwart.smtpPort, to: burner.address, subject: 'late', text: 'too late' }),

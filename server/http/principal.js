@@ -3,8 +3,11 @@
 /**
  * Who is calling /api/v1 — req.principal:
  *
- *   { kind: 'user', subject: 'usr_…', role, username }
- *       a person, with their Network session token as a Bearer.
+ *   { kind: 'user', subject: 'usr_…', role, username, viaSession }
+ *       a person, with their Network session token as a Bearer, or the openvibe.email session cookie set by
+ *       openvibe-sdk/sso after sign-in. A cookie-authenticated write must come from openvibe.email itself
+ *       (Sec-Fetch-Site same-origin, or an Origin equal to ours): another site cannot make a signed-in visitor
+ *       create a mask, turn one off or spend their burner allowance.
  *   { kind: 'app', requester: 'app:…' | 'agent:…' | 'service:…', subject: 'usr_…' | null, capabilities, claims }
  *       a Network app, agent or service token for audience openvibe.mail. When the token names the person it acts
  *       for (`on_behalf_of`), the app acts for that person and is held to that person's limits. When it does not,
@@ -13,20 +16,30 @@
  *       nobody. The only thing an anonymous caller may do is ask for a burner, and only within the limits that are
  *       counted by the address the request came from.
  *
- * A request that presents a token is judged on that token alone: a bad one is refused, never downgraded to
- * anonymous. A typed token (Network's `typ` or `purpose` claim) is not a session and is refused here as it is
- * everywhere else in the house.
+ * A request that presents a token is judged on that token alone: a bad one is refused, never downgraded to the
+ * session or to anonymous. A typed token (Network's `typ` or `purpose` claim) is not a session and is refused here
+ * as it is everywhere else in the house (openvibe-sdk's verifyUserToken enforces it).
  */
 const { serviceAuth, http, ids } = require('openvibe-contracts');
 
 const PRINCIPAL_SUB = /^(svc|app|mod|agent):/;
 const USER_SUB = /^usr_[0-9A-HJKMNP-TV-Z]{26}$/;
+const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
 // The capabilities Network may grant to an app that acts for a person. A person with their own token needs none.
 const CAPABILITIES = {
     write: 'mail.addresses.write',
     read: 'mail.messages.read',
 };
+
+/** Same-origin for a signed-in write: the browser's fetch metadata, else the Origin header. */
+function sameOrigin(req, baseUrl) {
+    const site = String(req.get('sec-fetch-site') || '');
+    if (site) return site === 'same-origin';
+    const origin = req.get('origin');
+    if (!origin) return false;
+    return origin === baseUrl || origin === `${req.protocol}://${req.get('host')}`;
+}
 
 function decodePayload(token) {
     const parts = String(token || '').split('.');
@@ -57,50 +70,81 @@ function capabilitiesOf(claims) {
 function createPrincipal({ config, keys }) {
     async function resolve(req) {
         const header = String(req.headers.authorization || '');
-        if (!header.startsWith('Bearer ')) return { principal: { kind: 'anonymous' } };
-        const token = header.slice(7).trim();
-        if (!token) return { error: [401, 'token.invalid', 'the Bearer token is empty'] };
+        if (header.startsWith('Bearer ')) {
+            const token = header.slice(7).trim();
+            if (!token) return { error: [401, 'token.invalid', 'the Bearer token is empty'] };
 
-        const payload = decodePayload(token);
-        if (payload && typeof payload.sub === 'string' && PRINCIPAL_SUB.test(payload.sub)) {
-            const publicKey = await keys.pemForToken(token);
-            if (!publicKey) return { error: [503, 'identity.unavailable', 'the Network signing key is not loaded yet'] };
-            const r = serviceAuth.verifyServiceToken(token, { publicKey, issuer: config.network.issuer, audience: config.network.audience });
-            if (!r.ok) return { error: [401, r.code || 'token.invalid', r.reason || 'the token does not verify'] };
-            const claims = r.claims || {};
-            const behalf = USER_SUB.test(String(claims.on_behalf_of || '')) ? claims.on_behalf_of : null;
+            const payload = decodePayload(token);
+            if (payload && typeof payload.sub === 'string' && PRINCIPAL_SUB.test(payload.sub)) {
+                const publicKey = await keys.pemForToken(token);
+                if (!publicKey) return { error: [503, 'identity.unavailable', 'the Network signing key is not loaded yet'] };
+                const r = serviceAuth.verifyServiceToken(token, { publicKey, issuer: config.network.issuer, audience: config.network.audience });
+                if (!r.ok) return { error: [401, r.code || 'token.invalid', r.reason || 'the token does not verify'] };
+                const claims = r.claims || {};
+                const behalf = USER_SUB.test(String(claims.on_behalf_of || '')) ? claims.on_behalf_of : null;
+                return {
+                    principal: {
+                        kind: 'app',
+                        requester: requesterOfSub(claims.sub),
+                        subject: behalf,
+                        capabilities: capabilitiesOf(claims),
+                        claims,
+                    },
+                };
+            }
+
+            const v = await keys.verifyUser(token, { issuer: config.network.issuer, audience: config.network.sessionAudience });
+            if (!v.ok) return { error: [401, v.expired ? 'token.expired' : 'token.invalid', v.reason] };
+            if (!ids.isSubjectId('user', v.claims.subject_id)) {
+                return { error: [403, 'identity.no_subject', 'this account has no canonical subject yet; sign in again'] };
+            }
             return {
                 principal: {
-                    kind: 'app',
-                    requester: requesterOfSub(claims.sub),
-                    subject: behalf,
-                    capabilities: capabilitiesOf(claims),
-                    claims,
+                    kind: 'user',
+                    subject: v.claims.subject_id,
+                    requester: `user:${v.claims.subject_id}`,
+                    capabilities: CAPABILITIES,
+                    role: roleClaim(v.claims),
+                    username: usernameClaim(v.claims),
+                    token,
+                    viaSession: false,
                 },
             };
         }
 
-        const v = await keys.verifyUser(token, { issuer: config.network.issuer, audience: config.network.sessionAudience });
-        if (!v.ok) return { error: [401, v.expired ? 'token.expired' : 'token.invalid', v.reason] };
-        if (!ids.isSubjectId('user', v.claims.subject_id)) {
-            return { error: [403, 'identity.no_subject', 'this account has no canonical subject yet; sign in again'] };
+        // No Authorization header: openvibe-sdk/sso's optionalAuth has verified the session cookie, if one was
+        // presented. A cookie that does not verify is anonymous; a Bearer header, present but bad, is never
+        // downgraded to the cookie (the branch above returns the error).
+        const viewer = req.user;
+        if (viewer && ids.isSubjectId('user', viewer.subject_id)) {
+            return {
+                principal: {
+                    kind: 'user',
+                    subject: viewer.subject_id,
+                    requester: `user:${viewer.subject_id}`,
+                    capabilities: CAPABILITIES,
+                    role: roleClaim(viewer),
+                    username: usernameClaim(viewer),
+                    token: req.token,
+                    viaSession: true,
+                },
+            };
         }
-        return {
-            principal: {
-                kind: 'user',
-                subject: v.claims.subject_id,
-                requester: `user:${v.claims.subject_id}`,
-                capabilities: CAPABILITIES,
-                role: roleClaim(v.claims),
-                username: usernameClaim(v.claims),
-                token,
-            },
-        };
+        return { principal: { kind: 'anonymous' } };
     }
 
     async function middleware(req, res, next) {
         const r = await resolve(req);
         if (r.error) return http.sendProblem(res, r.error[0], r.error[1], { detail: r.error[2], ctx: req.ov });
+        // A write authenticated by the session cookie must come from this site. (A Bearer token has no such rule:
+        // the token is the caller's, and a browser cannot read a cross-origin response without CORS approval.)
+        if (r.principal.kind === 'user' && r.principal.viaSession && !SAFE_METHODS.has(req.method)
+            && !sameOrigin(req, config.baseUrl)) {
+            return http.sendProblem(res, 403, 'mail.cross_site', {
+                detail: 'A signed-in request that changes something must come from openvibe.email itself.',
+                ctx: req.ov,
+            });
+        }
         req.principal = r.principal;
         return next();
     }
@@ -151,4 +195,4 @@ function createPrincipal({ config, keys }) {
     return { middleware, resolve, requirePerson, subjectOf, CAPABILITIES };
 }
 
-module.exports = { createPrincipal, CAPABILITIES, decodePayload };
+module.exports = { createPrincipal, CAPABILITIES, decodePayload, sameOrigin };

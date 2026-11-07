@@ -65,6 +65,9 @@ async function boot(opts = {}) {
         if (o.as) headers.authorization = `Bearer ${network.userToken(o.as)}`;
         if (o.bearer) headers.authorization = `Bearer ${o.bearer}`;
         if (o.token) headers['x-mail-burner-token'] = o.token;
+        if (o.cookie) headers.cookie = `ov_token=${o.cookie}`;
+        if (o.origin) headers.origin = o.origin;
+        if (o.secFetchSite) headers['sec-fetch-site'] = o.secFetchSite;
         let body;
         if (o.json !== undefined) {
             body = JSON.stringify(o.json);
@@ -88,6 +91,7 @@ async function boot(opts = {}) {
         get: (p, o) => call('GET', p, o),
         post: (p, o) => call('POST', p, o),
         del: (p, o) => call('DELETE', p, o),
+        options: (p, o) => call('OPTIONS', p, o),
         close: async () => {
             await new Promise((r) => server.close(r));
             await network.close();

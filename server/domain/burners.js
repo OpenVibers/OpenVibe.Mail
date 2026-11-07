@@ -37,7 +37,7 @@ function shape(row) {
     return {
         id: row.id,
         address: row.address,
-        owner: row.owner_subject || null,
+        owner: row.owner_subject || row.owner || null,
         expires_at: row.expires_at instanceof Date ? row.expires_at.toISOString() : row.expires_at,
         first_message_only: Boolean(row.first_message_only),
         created_at: row.created_at instanceof Date ? row.created_at.toISOString() : row.created_at,
@@ -138,11 +138,30 @@ async function createBurner({
 
 /** The person's burners, newest first. */
 async function listBurners({ db, owner }) {
+    const rows = await listBurnerRows({ db, owner });
+    return rows.map(shape);
+}
+
+/** The person's burners with the fields /me/mail needs beyond the contract (first message and expiry). */
+async function listBurnerRows({ db, owner }) {
     const rows = await db.many(sql`
-        SELECT id, owner_subject, address, expires_at, first_message_only, created_at
+        SELECT id, owner_subject, address, expires_at, first_message_only, first_message_at, created_at
           FROM mail_burners WHERE owner_subject = ${owner}
          ORDER BY created_at DESC`);
-    return rows.map(shape);
+    return rows.map((row) => ({
+        ...shape(row),
+        first_message_at: row.first_message_at instanceof Date
+            ? row.first_message_at.toISOString()
+            : (row.first_message_at || null),
+    }));
+}
+
+/** live (accepting mail), consumed (first_message_only and it has taken one) or expired. */
+function stateOf(row, now = () => Date.now()) {
+    if (!row) return null;
+    if (new Date(row.expires_at).getTime() <= now()) return 'expired';
+    if (row.first_message_only && row.first_message_at) return 'consumed';
+    return 'live';
 }
 
 /** One burner, whoever's it is. The caller decides what it may do with it. */
@@ -254,6 +273,8 @@ module.exports = {
     ANON_EXPIRY,
     createBurner,
     listBurners,
+    listBurnerRows,
+    stateOf,
     findBurner,
     authorizeBurner,
     mailboxOf,
