@@ -1,0 +1,14 @@
+# OpenVibe.Mail — the mail server's own slice.
+#
+# The host OOMed on 2026-11-07. Stalwart gets its own cgroup so a mail storm, a spam-filter model or a bad
+# configuration cannot take the rest of the host with it. MemoryMax is the hard ceiling; MemoryHigh starts
+# reclaiming before it.
+[Unit]
+Description=OpenVibe.Mail Stalwart slice (memory-capped after the host OOM on 2026-11-07)
+Documentation=https://github.com/OpenVibers/OpenVibe.Mail
+
+[Slice]
+MemoryMax=1G
+MemoryHigh=800M
+CPUQuota=100%
+TasksMax=512

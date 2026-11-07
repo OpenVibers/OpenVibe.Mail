@@ -1,0 +1,9 @@
+node_modules/
+data/
+.cache/
+.env
+.env.local
+*.local.js
+npm-debug.log*
+.DS_Store
+deploy/stalwart/rendered/

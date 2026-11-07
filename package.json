@@ -1,0 +1,41 @@
+{
+  "name": "openvibe-mail",
+  "version": "0.1.0",
+  "private": true,
+  "description": "OpenVibe.Mail — openvibe.email: masks that protect you, burners that self-destruct, and an inbox for every agent.",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "init-db": "node deploy/init-db.js",
+    "test": "node test/run.js",
+    "test:pg": "MAIL_TEST_STORE=pg node test/run.js",
+    "test:stalwart": "node test/stalwart/run.js",
+    "stalwart:fetch": "node scripts/fetch-stalwart.js",
+    "stalwart:render": "node deploy/stalwart/render.js",
+    "stalwart:apply": "node deploy/stalwart/apply.js"
+  },
+  "keywords": [
+    "openvibe",
+    "mail",
+    "masks",
+    "burners"
+  ],
+  "author": "OpenVibers",
+  "license": "AGPL-3.0-only",
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "express-rate-limit": "^7.5.0",
+    "helmet": "^8.1.0",
+    "openvibe-contracts": "https://codeload.github.com/OpenVibers/OpenVibe.Contracts/tar.gz/refs/tags/v0.327.0",
+    "openvibe-sdk": "https://codeload.github.com/OpenVibers/OpenVibe.SDK/tar.gz/refs/tags/v0.97.1",
+    "openvibe-shared": "https://codeload.github.com/OpenVibers/OpenVibe.Shared/tar.gz/refs/tags/v4.135.0",
+    "pg": "^8.23.0"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8"
+  }
+}
