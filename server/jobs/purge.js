@@ -100,9 +100,10 @@ async function runDue({ db, stalwart, events, now = () => Date.now(), log = cons
             (log.warn || log.log).call(log, `[mail] the burner ${burner.id} was not purged: ${err && err.message}`);
         }
     }
-    // The directory no longer resolves the expired addresses, but the mail server's account cache still holds
-    // the aliases it learned: without this, a just-expired burner would keep receiving until its cache aged out.
-    if (report.expired && stalwart) {
+    // The view no longer resolves the expired addresses (whether or not the delete succeeded), but the mail
+    // server's account cache still holds what it learned: without this, a just-expired burner could keep receiving
+    // until the cache aged out. Invalidate for every due address, not only the ones purged this run.
+    if (expired.length && stalwart) {
         try {
             await stalwart.invalidateCaches();
         } catch (err) {

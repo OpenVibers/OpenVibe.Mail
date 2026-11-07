@@ -41,8 +41,10 @@ test('a failed delete keeps the burner, so the next run deletes the mail', async
         ...s.mail,
         async listMessages() { throw new Error('the mail server is down'); },
     };
+    const before = broken.calls.invalidateCaches;
     const report = await runDue({ db: s.db, stalwart: broken, events: null, now: () => Date.now() });
 
     assert.strictEqual(report.expired, 0);
+    assert.ok(broken.calls.invalidateCaches > before, 'the expired address still leaves the cache even though its mail was not deleted');
     assert.strictEqual(await s.db.value('SELECT count(*)::int FROM mail_burners WHERE id = $1', [made.body.burner.id]), 1);
 });
