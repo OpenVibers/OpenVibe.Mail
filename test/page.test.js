@@ -50,3 +50,15 @@ test('the page\'s files are served by content hash, and Shared\'s from /shared',
     const missing = await s.get('/js/nope.js');
     assert.strictEqual(missing.status, 404);
 });
+
+test('/release.json is the release manifest open tabs poll, never cached', async (t) => {
+    const s = await boot();
+    t.after(() => s.close());
+    const r = await s.get('/release.json');
+    assert.strictEqual(r.status, 200);
+    assert.match(r.headers.get('cache-control') || '', /no-cache/);
+    const m = JSON.parse(r.text);
+    assert.strictEqual(m.service, 'mail');
+    assert.ok(typeof m.release === 'string' && m.release.length > 0, 'the deployed commit');
+    assert.ok(m.packages && m.packages['openvibe-shared'], 'the platform packages it runs');
+});

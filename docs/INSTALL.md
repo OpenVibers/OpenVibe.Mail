@@ -94,6 +94,10 @@ STALWART_DB_USER=ov_mail
 STALWART_DB_PASSWORD=REPLACE
 STALWART_BLOB_STORE=fs
 STALWART_BLOB_PATH=/var/lib/openvibe-stalwart/blobs
+# The admin in normal mode too: Stalwart 1.0.3 defines its admin from this variable whether or not recovery mode
+# is on. Without it the management API answers "You have to authenticate first" and /api/ready stays 503.
+# The same password as STALWART_ADMIN_PASSWORD in mail.env (production, 2026-11-07).
+STALWART_RECOVERY_ADMIN=admin:REPLACE_WITH_THE_SAME_PASSWORD_AS_STALWART_ADMIN_PASSWORD
 STALWART_BLOB_DEPTH=2
 # Optional, only when STALWART_BLOB_STORE=s3:
 #STALWART_BLOB_ENDPOINT=https://s3.eu-central-003.backblazeb2.com
@@ -201,6 +205,10 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now openvibe-stalwart.slice openvibe-stalwart.service
 ```
 
+Before applying again, run the service's migrations (step 8's `deploy/init-db.js`, or the first `ovhost deploy
+mail`, which runs them at boot): the SQL directory reads Mail's tables, and the second apply answers 500 while they
+do not exist yet (production, 2026-11-07).
+
 Now the normal start has written the built-in roles. Apply again; this sets `Authentication.defaultUserRoleIds`
 (the `User` role) and reloads the settings, so an account the directory creates receives mail instead of being
 refused with "This account is not authorized to receive email":
@@ -231,6 +239,22 @@ sudo systemctl enable --now openvibe-mail.service
 
 `deploy/init-db.js` runs the migrations through `DATABASE_DIRECT_URL`; the service would also do it at boot, but a
 failure here is easier to read. The service adds the domains it knows on start; there is no pool mailbox.
+
+On a host run by ovhost (production), the inventory entry does this step instead: `ovhost service add mail`, then
+`ovhost deploy mail` builds a release, installs `openvibe-mail.service` and starts it (the unit runs as the house
+user, `ubuntu`, like every Node service; Stalwart alone runs as `openvibe`). Do not rsync into `/opt/openvibe.mail`
+by hand there.
+
+The OAuth client comes from Network: once Network has seeded the `mail` client (it ships with Network), write its
+credentials into Mail's env from Network's checkout, then restart Mail:
+
+```sh
+cd /opt/openvibe.network
+sudo node --env-file=/etc/openvibe/network.env server/setup/service-principal.js rotate mail --write-env /etc/openvibe/mail.env
+sudo systemctl restart openvibe-mail
+```
+
+It writes `OV_OAUTH_CLIENT_ID` and `OV_OAUTH_CLIENT_SECRET` (0600) and prints neither. Back up `mail.env` first.
 
 ## 9. The public door (nginx)
 
@@ -263,7 +287,9 @@ secret in `OV_OAUTH_CLIENT_SECRET` in `/etc/openvibe/mail.env`, or sign-in canno
 ## 10. DNS
 
 Publish the records in [`docs/DNS.md`](DNS.md), keeping the mail A/AAAA records **DNS-only** in Cloudflare. Wait for
-the MX, then test from outside:
+the MX, then test from outside (a home connection usually cannot: most ISPs block outbound port 25, so
+`connect` times out even to Gmail's MX; watch for outside SYNs on the host instead,
+`sudo timeout 240 tcpdump -n -i any 'tcp dst port 25 and tcp[tcpflags] & (tcp-syn|tcp-ack) == tcp-syn and not src net 127.0.0.0/8' -c 3`):
 
 ```sh
 dig +short MX openvibe.email
@@ -280,7 +306,10 @@ journalctl -u openvibe-stalwart -u openvibe-mail --since '10 min ago' --no-pager
 ```
 
 Then, with a person's token, create a mask, send it one message from another account, and read it through JMAP (or
-create a burner and use `GET /api/v1/burners/:id/code`). A body must never appear in either journal. Check that
+create a burner and use `GET /api/v1/burners/:id/code`). With no outside sender at hand, the host itself can deliver
+one over loopback SMTP: a relay to a foreign domain must answer `550 5.7.1 Relay not allowed`, an unknown local
+mailbox `550 5.1.1 Mailbox does not exist`, and a code mail to a fresh burner must come back from
+`GET /api/v1/burners/:id/code` (production, 2026-11-07: code 482913, read back in under a second). A body must never appear in either journal. Check that
 the public door answers:
 
 ```sh
