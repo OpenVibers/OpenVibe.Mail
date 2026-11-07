@@ -40,7 +40,6 @@ function testEnv(overrides = {}) {
         STALWART_URL: 'http://127.0.0.1:18080',
         STALWART_ADMIN_USER: 'admin',
         STALWART_ADMIN_PASSWORD: 'ov-test-admin-password',
-        STALWART_TEST_MODE: '1',
         ...overrides,
     };
 }
@@ -62,6 +61,20 @@ async function waitFor(check, { timeoutMs = 40_000, everyMs = 250, what = 'the m
         await sleep(everyMs);
     }
     throw new Error(`${what} did not answer in ${timeoutMs}ms${last ? `: ${last.message}` : ''}`);
+}
+
+/**
+ * The acceptance test sends 300 messages to one burner in a burst. Production keeps Stalwart's inbound throttles
+ * (5/second per IP, 25/hour per sender-domain/recipient); only this harness turns them off, after the plan is
+ * applied and the settings are reloaded.
+ */
+async function disableInboundThrottles(client) {
+    const q = await client.one('x:MtaInboundThrottle/query', { filter: {}, limit: 20 }, 'tq');
+    if (!(q.ids || []).length) return;
+    const update = {};
+    for (const id of q.ids) update[id] = { enable: false };
+    await client.one('x:MtaInboundThrottle/set', { update }, 'tt');
+    await client.one('x:Action/set', { create: { reload: { '@type': 'ReloadSettings' } } }, 'trs');
 }
 
 async function start({ env = testEnv(), binary = null } = {}) {
@@ -147,11 +160,13 @@ async function start({ env = testEnv(), binary = null } = {}) {
         await waitReady(childState, 'Stalwart JMAP');
         // The normal start has now written the built-in roles, so the Authentication defaults can be set. This is
         // the harness's second pass; an installed server runs apply once against an already-started Stalwart.
-        await apply(plan, createClient({
+        const client = createClient({
             url,
             user: env.STALWART_ADMIN_USER,
             password: env.STALWART_ADMIN_PASSWORD,
-        }), env);
+        });
+        await apply(plan, client, env);
+        await disableInboundThrottles(client);
     } catch (err) {
         await stopState(childState);
         throw new Error(`${err.message}\n--- stalwart log ---\n${logs.join('').slice(-6000)}`);
