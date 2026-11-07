@@ -245,8 +245,17 @@ function createStalwartClient({ config, fetchImpl = globalThis.fetch, log = cons
         if (!accountId) return false;
         const result = await one('x:Account/set', { destroy: [accountId] }, 'd');
         const destroyed = (result.destroyed || []).map(String).includes(String(accountId));
-        if (destroyed) accountCache.delete(key);
-        return destroyed;
+        if (!destroyed) {
+            const why = result && result.notDestroyed && result.notDestroyed[accountId];
+            throw new StalwartError(`the mail server did not destroy the burner account: ${(why && (why.description || why.type)) || 'refused'}`);
+        }
+        accountCache.delete(key);
+        // The directory row is already gone; the account must be gone too, or the address could still resolve
+        // through the server's account cache. If it is still there, keep the burner row for the next purge run.
+        if (await accountIdFor(key)) {
+            throw new StalwartError(`the burner account ${key} still exists after destroy`);
+        }
+        return true;
     }
 
     /** Forget the directory's answers, so an address that was turned off stops resolving at once. */

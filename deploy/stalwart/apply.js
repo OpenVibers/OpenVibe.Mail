@@ -206,6 +206,21 @@ async function apply(plan, client, env = process.env) {
     }, 'ma');
     problems.push(...setProblems('mta auth', mtaAuth));
 
+    // The acceptance test sends 300 messages to one burner in a burst; production keeps Stalwart's inbound
+    // throttles (5/second per IP, 25/hour per sender-domain/recipient). Only the harness sets STALWART_TEST_MODE.
+    if (String(env.STALWART_TEST_MODE || '') === '1') {
+        const tq = await client.one('x:MtaInboundThrottle/query', { filter: {}, limit: 20 }, 'tq');
+        if ((tq.ids || []).length) {
+            const update = {};
+            for (const id of tq.ids) update[id] = { enable: false };
+            const throttles = await client.one('x:MtaInboundThrottle/set', { update }, 'tt');
+            problems.push(...setProblems('inbound throttle', throttles));
+            const reload = await client.one('x:Action/set', { create: { reload: { '@type': 'ReloadSettings' } } }, 'trs')
+                .catch((err) => ({ notCreated: { reload: { description: err.message } } }));
+            problems.push(...setProblems('reload after test throttles', reload));
+        }
+    }
+
     // A debug tracer is opt-in (STALWART_DEBUG=1) and exists for the acceptance test's failure output. It is
     // created in the recovery phase so the normal phase's SMTP sessions are logged.
     if (String(env.STALWART_DEBUG || '') === '1') {

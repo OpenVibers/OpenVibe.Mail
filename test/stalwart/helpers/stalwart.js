@@ -40,6 +40,7 @@ function testEnv(overrides = {}) {
         STALWART_URL: 'http://127.0.0.1:18080',
         STALWART_ADMIN_USER: 'admin',
         STALWART_ADMIN_PASSWORD: 'ov-test-admin-password',
+        STALWART_TEST_MODE: '1',
         ...overrides,
     };
 }
