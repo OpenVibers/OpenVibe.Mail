@@ -16,10 +16,26 @@ const express = require('express');
 const shell = require('openvibe-shared/shell');
 const ovServe = require('openvibe-shared/serve');
 const cache = require('openvibe-shared/cache-policy');
+const contracts = require('openvibe-contracts');
 
 const PUBLIC_DIR = path.join(__dirname, '..', '..', 'public');
-const SITE_NAME = 'OpenVibe.Email';
 const NETWORK_URL = 'https://openvibe.network';
+
+/**
+ * The navbar's service id and display name from the site block in OpenVibe.Contracts (the `mail` manifest), with the
+ * names the page shipped with before that manifest existed. The site block says "Email", so the page reads
+ * "OpenVibe.Email"; the service id is what Shared's navbar, history and theme use.
+ */
+function siteIdentity(manifest) {
+    const short = manifest && manifest.site && manifest.site.name;
+    return {
+        service: (manifest && manifest.id) || 'mail',
+        name: short ? (/^Open[A-Z]/.test(short) ? short : `OpenVibe.${short}`) : 'OpenVibe.Email',
+    };
+}
+const SITE = siteIdentity(contracts.services && contracts.services.get && contracts.services.get('mail'));
+const SITE_NAME = SITE.name;
+const SERVICE = SITE.service;
 
 const hashes = new Map();
 function assetVersion(rel) {
@@ -51,7 +67,7 @@ const BODY = fs.readFileSync(path.join(__dirname, '..', 'views', 'home.html'), '
 function homePage(config) {
     const base = String(config.baseUrl || 'https://openvibe.email').replace(/\/+$/, '');
     const nav = {
-        service: 'mail',
+        service: SERVICE,
         apiBase: NETWORK_URL,
         links: [{ label: 'Home', href: '/', active: true }],
         history: { type: 'page', title: SITE_NAME },
@@ -60,7 +76,7 @@ function homePage(config) {
         loginUrl: '/auth/login?next={path}',
         logoutUrl: '/auth/logout?next={path}',
     };
-    const footer = { service: 'mail', variant: 'full', mount: '#ov-footer', brandName: SITE_NAME };
+    const footer = { service: SERVICE, variant: 'full', mount: '#ov-footer', brandName: SITE_NAME };
     return shell.page({
         name: SITE_NAME,
         lang: 'en',
@@ -110,4 +126,4 @@ function mountPages(app, { config }) {
     });
 }
 
-module.exports = { mountPages, homePage, CSP, asset };
+module.exports = { mountPages, homePage, siteIdentity, CSP, asset };
