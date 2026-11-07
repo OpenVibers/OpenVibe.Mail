@@ -7,7 +7,13 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const { boot } = require('./helpers/boot');
-const { asset } = require('../server/http/pages');
+const { asset, siteIdentity } = require('../server/http/pages');
+
+test('the navbar takes its service and name from the Contracts site block', () => {
+    assert.deepStrictEqual(siteIdentity({ id: 'mail', site: { name: 'Email' } }), { service: 'mail', name: 'OpenVibe.Email' });
+    assert.deepStrictEqual(siteIdentity({ id: 'mail', site: { name: 'OpenVibe.Post' } }), { service: 'mail', name: 'OpenVibe.Post' }, 'a brand name is not doubled');
+    assert.deepStrictEqual(siteIdentity(null), { service: 'mail', name: 'OpenVibe.Email' }, 'before the manifest is pinned, the page keeps the names it shipped with');
+});
 
 test('/ is the page: the ten-minute address, the honest cards, the navbar, a strict policy', async (t) => {
     const s = await boot();
