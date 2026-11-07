@@ -44,6 +44,7 @@ function load(overrides = null) {
     const baseDomain = domain('MAIL_BASE_DOMAIN', 'openvibe.email');
     const maskDomain = domain('MAIL_MASK_DOMAIN', `mask.${baseDomain}`);
     const burnerDomains = list('BURNER_DOMAINS');
+    const baseUrl = String(env.BASE_URL || `https://${baseDomain}`).replace(/\/+$/, '');
 
     if (isProduction && !env.DATABASE_URL) {
         throw new Error('DATABASE_URL is not set: production serves from PostgreSQL (OpenVibe.Host roles/data/add-service.sh today)');
@@ -64,7 +65,7 @@ function load(overrides = null) {
         service: 'mail',
         port: int('PORT', 5250),
         host: env.HOST || '127.0.0.1',
-        baseUrl: env.BASE_URL || `https://${baseDomain}`,
+        baseUrl,
         trustProxy: int('TRUST_PROXY', 0),
 
         db: {
@@ -84,6 +85,16 @@ function load(overrides = null) {
             issuer: env.OV_NETWORK_ISSUER || env.OV_NETWORK_URL || 'https://openvibe.network',
             audience: env.MAIL_AUDIENCE || 'openvibe.mail',
             sessionAudience: env.OV_SESSION_AUDIENCE || 'openvibe.network',
+        },
+
+        oauth: {
+            clientId: env.OV_OAUTH_CLIENT_ID || 'mail',
+            clientSecret: env.OV_OAUTH_CLIENT_SECRET || '',
+            redirectUri: env.OV_OAUTH_REDIRECT_URI || `${baseUrl}/auth/callback`,
+            scope: env.OV_OAUTH_SCOPE || 'profile',
+        },
+        cookies: {
+            secure: env.COOKIE_SECURE ? env.COOKIE_SECURE === 'true' : isProduction,
         },
 
         addresses: {

@@ -10,8 +10,11 @@ not collide with the plan, then the plan's listeners, then the Node service.
 
 - The host's public IPv4 (and IPv6 if it has one), with inbound TCP 25 allowed and **587/465 closed**.
 - PostgreSQL 18 reachable on the host (direct for migrations; PgBouncer for the runtime if the host uses it).
-- A Backblaze B2 bucket `openvibe-mail` and an application key limited to that bucket (read/write).
+- A writable local directory for message blobs, `/var/lib/openvibe-stalwart/blobs` by default (M1). A Backblaze
+  B2 bucket is optional: set `STALWART_BLOB_STORE=s3` to keep blobs off the mail server's disk.
 - Node 22 on the host.
+- An OAuth client in OpenVibe.Network for `mail`: redirect `https://openvibe.email/auth/callback` (the Network
+  seeds first-party clients in its database; this one is added with the host install, not by this repository).
 - The pinned Stalwart binary, see [`deploy/stalwart/VERSION`](../deploy/stalwart/VERSION).
 
 Create the service user once:
@@ -54,9 +57,16 @@ the service's migrations create `mail_*` and the directory view. They share the 
 
 ## 2. Blob store
 
-Create the bucket and an application key in B2. Note the endpoint (for example
-`https://s3.eu-central-003.backblazeb2.com`) and the region (`eu-central-003`). Stalwart stores message blobs
-there; the service never reads blobs directly.
+**M1 default: local disk.** Stalwart writes message blobs under `/var/lib/openvibe-stalwart/blobs` (the unit's
+`StateDirectory=openvibe-stalwart` already owns and writably mounts that tree). Nothing else is needed. The depth
+(`STALWART_BLOB_DEPTH`, default 2) decides the hash directory layout and **must not change** once blobs exist: the
+server would look in the wrong directories and stop finding old messages.
+
+**Optional: Backblaze B2 (or any S3-compatible store).** Create a bucket `openvibe-mail` and an application key
+limited to it, then set `STALWART_BLOB_STORE=s3` and the `STALWART_BLOB_*` values in
+`/etc/openvibe/stalwart.env`. The endpoint is a custom S3 region to Stalwart (for example
+`https://s3.eu-central-003.backblazeb2.com`), the region is `eu-central-003`. The service never reads blobs
+directly either way.
 
 ## 3. The Stalwart binary
 
@@ -82,11 +92,15 @@ STALWART_DB_PORT=5432
 STALWART_DB_NAME=ov_mail
 STALWART_DB_USER=ov_mail
 STALWART_DB_PASSWORD=REPLACE
-STALWART_BLOB_ENDPOINT=https://s3.eu-central-003.backblazeb2.com
-STALWART_BLOB_BUCKET=openvibe-mail
-STALWART_BLOB_REGION=eu-central-003
-STALWART_BLOB_ACCESS_KEY_ID=REPLACE
-STALWART_BLOB_SECRET_KEY=REPLACE
+STALWART_BLOB_STORE=fs
+STALWART_BLOB_PATH=/var/lib/openvibe-stalwart/blobs
+STALWART_BLOB_DEPTH=2
+# Optional, only when STALWART_BLOB_STORE=s3:
+#STALWART_BLOB_ENDPOINT=https://s3.eu-central-003.backblazeb2.com
+#STALWART_BLOB_BUCKET=openvibe-mail
+#STALWART_BLOB_REGION=eu-central-003
+#STALWART_BLOB_ACCESS_KEY_ID=REPLACE
+#STALWART_BLOB_SECRET_KEY=REPLACE
 ```
 
 `/etc/openvibe/mail.env` (root:root, 0600) — names are described in `.env.example`; the values that matter for M1:
@@ -111,11 +125,14 @@ STALWART_ADMIN_PASSWORD=REPLACE_WITH_THE_RECOVERY_ADMIN_PASSWORD
 MAIL_EVENTS_URL=http://127.0.0.1:4300
 MAIL_EVENTS_CLIENT_ID=mail
 MAIL_EVENTS_CLIENT_SECRET=REPLACE
+OV_OAUTH_CLIENT_ID=mail
+OV_OAUTH_CLIENT_SECRET=REPLACE_WITH_THE_NETWORK_CLIENT_SECRET
+# COOKIE_SECURE defaults to true in production.
 ```
 
 If the host uses PgBouncer, `DATABASE_URL` points at it and `DATABASE_DIRECT_URL` stays direct; migrations run on
-the direct connection. The Stalwart env file needs the blob keys only for `apply.js`; the running server reads the
-blob store from its database.
+the direct connection. The Stalwart env file needs the S3 keys only when `STALWART_BLOB_STORE=s3`; the running server reads the blob
+store from its database. The Network client secret is needed by the sign-in exchange and is never logged.
 
 ## 5. Render the configuration
 
@@ -162,7 +179,9 @@ kill "$(cat /tmp/stalwart-recovery.pid)"
 rm -f /etc/openvibe/stalwart-recovery.env
 ```
 
-The first pass creates the SQL directory, the domains, the S3 blob store, the spam setting and the three listeners.
+The first pass creates the SQL directory, the domains, the local Filesystem blob store, the spam setting and the
+three listeners. (With `STALWART_BLOB_STORE=s3` it creates the S3 store instead and the two keys are read from
+`/etc/openvibe/stalwart.env`.)
 It may skip the default roles because recovery mode has not written them yet; the second pass below sets them.
 
 ## 7. Start the service and apply the roles
@@ -208,7 +227,35 @@ sudo systemctl enable --now openvibe-mail.service
 `deploy/init-db.js` runs the migrations through `DATABASE_DIRECT_URL`; the service would also do it at boot, but a
 failure here is easier to read. The service adds the domains it knows on start; there is no pool mailbox.
 
-## 9. DNS
+## 9. The public door (nginx)
+
+The parked `openvibe.email` block in `/etc/nginx/sites-enabled/parked-domains.conf` redirects the name to Chat.
+Remove it (or comment it out) first; otherwise nginx keeps answering with the parked server. Then install the
+repository's vhost:
+
+```sh
+sudo install -m 0644 deploy/nginx/openvibe.email.conf /etc/nginx/sites-available/openvibe.email.conf
+sudo ln -sfn /etc/nginx/sites-available/openvibe.email.conf /etc/nginx/sites-enabled/openvibe.email.conf
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+The `server_name` lines are:
+
+```nginx
+server_name openvibe.email www.openvibe.email;   # port 80: redirect to https
+server_name www.openvibe.email;                  # port 443: redirect to the apex
+server_name openvibe.email;                      # port 443: the API and the sign-in routes
+```
+
+The host's `/etc/nginx/conf.d/cloudflare-realip.conf` (included globally from `nginx.conf`) restores the person's
+address from `CF-Connecting-IP` for every vhost; this file does not repeat it, like the rest of the house. Only
+`/api/v1/`, `/api/health`, `/api/ready` and the Network sign-in routes (`/auth/`) are proxied to the Mail service;
+`/` is the placeholder until the page lands.
+
+Register the Network OAuth client for `mail` with redirect `https://openvibe.email/auth/callback`, and put its
+secret in `OV_OAUTH_CLIENT_SECRET` in `/etc/openvibe/mail.env`, or sign-in cannot finish.
+
+## 10. DNS
 
 Publish the records in [`docs/DNS.md`](DNS.md), keeping the mail A/AAAA records **DNS-only** in Cloudflare. Wait for
 the MX, then test from outside:
@@ -218,7 +265,7 @@ dig +short MX openvibe.email
 python3 -c "import smtplib; s=smtplib.SMTP('mail.openvibe.email',25,timeout=10); print(s.ehlo()[1]); s.quit()"
 ```
 
-## 10. Verify
+## 11. Verify
 
 ```sh
 curl -fsS http://127.0.0.1:5250/api/health
@@ -228,9 +275,17 @@ journalctl -u openvibe-stalwart -u openvibe-mail --since '10 min ago' --no-pager
 ```
 
 Then, with a person's token, create a mask, send it one message from another account, and read it through JMAP (or
-create a burner and use `GET /api/v1/burners/:id/code`). A body must never appear in either journal.
+create a burner and use `GET /api/v1/burners/:id/code`). A body must never appear in either journal. Check that
+the public door answers:
 
-## 11. Firewall and things not to do
+```sh
+curl -fsS https://openvibe.email/api/health
+curl -fsS https://openvibe.email/api/ready
+curl -fsS -o /dev/null -w '%{http_code}\n' https://openvibe.email/           # 200 placeholder
+curl -fsS -o /dev/null -w '%{http_code}\n' https://openvibe.email/api/v1/masks # 401 without a token
+```
+
+## 12. Firewall and things not to do
 
 - Allow inbound TCP 25 only. Do not open 587 or 465: there is no submission listener and no relay.
 - Keep 8080, 143 and 5250 on loopback. The public API is whatever nginx/Network fronts; M1 has no public site.
@@ -239,12 +294,12 @@ create a burner and use `GET /api/v1/burners/:id/code`). A body must never appea
 - The memory cap is the slice's (`/etc/systemd/system/openvibe-stalwart.slice`). The host OOMed on 2026-11-07; do
   not raise `MemoryMax` without measuring the spam filter and a busy mailbox first.
 
-## 12. Rollback
+## 13. Rollback
 
 ```sh
 sudo systemctl stop openvibe-mail.service openvibe-stalwart.service
 sudo systemctl disable openvibe-mail.service openvibe-stalwart.service
 ```
 
-The data stays in PostgreSQL (`ov_mail`) and B2. Removing the DNS MX records stops new mail; mail already queued on
+The data stays in PostgreSQL (`ov_mail`) and the blob store (local disk, or B2 with `STALWART_BLOB_STORE=s3`). Removing the DNS MX records stops new mail; mail already queued on
 other servers retries until their expiry, so keep the host reachable until the queues drain.

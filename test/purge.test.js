@@ -48,3 +48,22 @@ test('a failed delete keeps the burner, so the next run deletes the mail', async
     assert.ok(broken.calls.invalidateCaches > before, 'the expired address still leaves the cache even though its mail was not deleted');
     assert.strictEqual(await s.db.value('SELECT count(*)::int FROM mail_burners WHERE id = $1', [made.body.burner.id]), 1);
 });
+
+test('a mask whose life has run out is disabled, and the mail server is told once', async (t) => {
+    const s = await boot();
+    t.after(() => s.close());
+    const alice = s.network.addUser('alice');
+
+    const made = await s.post('/api/v1/masks', { as: alice, json: { purpose: 'one purchase', expires_days: 1 } });
+    assert.strictEqual(made.status, 201);
+    await s.db.exec("UPDATE mail_masks SET expires_at = now() - interval '1 minute' WHERE id = $1", [made.body.mask.id]);
+
+    const before = s.mail.calls.invalidateCaches;
+    const report = await runDue({ db: s.db, stalwart: s.mail, events: null, now: () => Date.now() });
+    assert.strictEqual(report.masksDisabled, 1);
+    assert.ok(s.mail.calls.invalidateCaches > before, 'the mail server forgot the disabled address');
+    assert.strictEqual(await s.db.value('SELECT enabled FROM mail_masks WHERE id = $1', [made.body.mask.id]), false);
+
+    const listed = await s.get('/api/v1/me/mail', { as: alice });
+    assert.strictEqual(listed.body.masks[0].state, 'expired');
+});

@@ -8,7 +8,9 @@
  *   plan.json     the settings apply.js reconciles over loopback JMAP
  *
  * Nothing secret is written: the data-store password stays an EnvironmentVariable reference, and the S3 keys are
- * the *names* of environment variables that apply.js resolves in memory.
+ * the *names* of environment variables that apply.js resolves in memory. M1's default blob store is the local
+ * filesystem (STALWART_BLOB_STORE=fs); STALWART_BLOB_STORE=s3 keeps the B2/MinIO path available for a host that
+ * wants blobs off the mail server's disk.
  *
  *   node deploy/stalwart/render.js [--config PATH] [--out DIR]
  */
@@ -23,46 +25,43 @@ function arg(name, fallback) {
     return i >= 0 && process.argv[i + 1] ? process.argv[i + 1] : fallback;
 }
 
-function envString(name, fallback) {
-    const v = process.env[name];
-    return v === undefined || v === '' ? fallback : String(v).trim();
-}
-
-function envInt(name, fallback) {
-    const v = process.env[name];
-    if (v === undefined || v === '') return fallback;
-    const n = Number(v);
-    if (!Number.isInteger(n) || n < 0) throw new Error(`${name} must be a whole number`);
-    return n;
-}
-
-function envBool(name, fallback) {
-    const v = process.env[name];
-    if (v === undefined || v === '') return fallback;
-    return /^(1|true|yes|on)$/i.test(String(v).trim());
-}
-
-function envList(name, fallback) {
-    const v = process.env[name];
-    if (v === undefined || v === '') return fallback;
-    return String(v).split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
-}
-
 function required(value, what) {
     if (!value) throw new Error(`${what} is empty (see .env.example)`);
     return value;
 }
 
-function render(config) {
+function render(config, env = process.env) {
+    const getEnv = (name, fallback) => {
+        const v = env[name];
+        return v === undefined || v === '' ? fallback : v;
+    };
+    const getString = (name, fallback) => String(getEnv(name, fallback)).trim();
+    const getInt = (name, fallback) => {
+        const v = getEnv(name, fallback);
+        if (v === undefined || v === '') return fallback;
+        const n = Number(v);
+        if (!Number.isInteger(n) || n < 0) throw new Error(`${name} must be a whole number`);
+        return n;
+    };
+    const getBool = (name, fallback) => {
+        const v = getEnv(name, fallback);
+        if (v === undefined || v === '') return fallback;
+        return /^(1|true|yes|on)$/i.test(String(v).trim());
+    };
+    const getList = (name, fallback) => {
+        const v = getEnv(name, fallback);
+        if (v === undefined || v === '') return fallback;
+        return String(v).split(',').map((item) => item.trim().toLowerCase()).filter(Boolean);
+    };
     const db = config.data_store || {};
     if (String(db.kind || '').toLowerCase() !== 'postgresql') {
         throw new Error('config.toml: data_store.kind must be "postgresql" (M1 stores mail in PostgreSQL)');
     }
-    const host = envString('STALWART_DB_HOST', db.host);
-    const port = envInt('STALWART_DB_PORT', db.port);
-    const database = envString('STALWART_DB_NAME', db.database);
-    const user = envString('STALWART_DB_USER', db.user);
-    const passwordEnv = envString('STALWART_DB_PASSWORD_ENV', db.password_env || 'STALWART_DB_PASSWORD');
+    const host = getString('STALWART_DB_HOST', db.host);
+    const port = getInt('STALWART_DB_PORT', db.port);
+    const database = getString('STALWART_DB_NAME', db.database);
+    const user = getString('STALWART_DB_USER', db.user);
+    const passwordEnv = getString('STALWART_DB_PASSWORD_ENV', db.password_env || 'STALWART_DB_PASSWORD');
     required(host, 'STALWART_DB_HOST');
     required(database, 'STALWART_DB_NAME');
     required(user, 'STALWART_DB_USER');
@@ -74,41 +73,58 @@ function render(config) {
         database,
         authUsername: user,
         authSecret: { '@type': 'EnvironmentVariable', variableName: passwordEnv },
-        useTls: envBool('STALWART_DB_SSL', Boolean(db.ssl)),
+        useTls: getBool('STALWART_DB_SSL', Boolean(db.ssl)),
         allowInvalidCerts: false,
-        poolMaxConnections: envInt('STALWART_DB_POOL_MAX', db.pool_max_connections || 20),
+        poolMaxConnections: getInt('STALWART_DB_POOL_MAX', db.pool_max_connections || 20),
     };
 
     const blob = config.blob_store || {};
     const domains = config.domains || {};
-    const base = envString('MAIL_BASE_DOMAIN', domains.base);
-    const mask = envString('MAIL_MASK_DOMAIN', domains.mask);
-    const burners = envList('BURNER_DOMAINS', domains.burners || []);
+    const base = getString('MAIL_BASE_DOMAIN', domains.base);
+    const mask = getString('MAIL_MASK_DOMAIN', domains.mask);
+    const burners = getList('BURNER_DOMAINS', domains.burners || []);
     if (!burners.length) throw new Error('BURNER_DOMAINS is empty: a burner needs a domain to live on');
 
-    const smtpBind = envString('STALWART_SMTP_BIND', config.listeners.smtp_bind);
-    const smtpPort = envInt('STALWART_SMTP_PORT', config.listeners.smtp_port);
-    const httpBind = envString('STALWART_HTTP_BIND', config.listeners.http_bind);
-    const httpPort = envInt('STALWART_HTTP_PORT', config.listeners.http_port);
-    const imapBind = envString('STALWART_IMAP_BIND', config.listeners.imap_bind);
-    const imapPort = envInt('STALWART_IMAP_PORT', config.listeners.imap_port);
+    const smtpBind = getString('STALWART_SMTP_BIND', config.listeners.smtp_bind);
+    const smtpPort = getInt('STALWART_SMTP_PORT', config.listeners.smtp_port);
+    const httpBind = getString('STALWART_HTTP_BIND', config.listeners.http_bind);
+    const httpPort = getInt('STALWART_HTTP_PORT', config.listeners.http_port);
+    const imapBind = getString('STALWART_IMAP_BIND', config.listeners.imap_bind);
+    const imapPort = getInt('STALWART_IMAP_PORT', config.listeners.imap_port);
 
-    const blobStore = {
-        kind: String(blob.kind || '').toLowerCase(),
-        endpoint: envString('STALWART_BLOB_ENDPOINT', blob.endpoint),
-        bucket: envString('STALWART_BLOB_BUCKET', blob.bucket),
-        region: envString('STALWART_BLOB_REGION', blob.region),
-        accessKeyIdEnv: envString('STALWART_BLOB_ACCESS_KEY_ID_ENV', blob.access_key_id_env || 'STALWART_BLOB_ACCESS_KEY_ID'),
-        secretKeyEnv: envString('STALWART_BLOB_SECRET_KEY_ENV', blob.secret_key_env || 'STALWART_BLOB_SECRET_KEY'),
-        allowInvalidCerts: envBool('STALWART_BLOB_ALLOW_INVALID_CERTS', Boolean(blob.allow_invalid_certs)),
-        verifyAfterWrite: envBool('STALWART_BLOB_VERIFY_AFTER_WRITE', blob.verify_after_write !== false),
-        timeoutMs: envInt('STALWART_BLOB_TIMEOUT_MS', blob.timeout_ms || 30000),
-        maxRetries: envInt('STALWART_BLOB_MAX_RETRIES', blob.max_retries || 3),
-        keyPrefix: envString('STALWART_BLOB_KEY_PREFIX', blob.key_prefix || '') || null,
-    };
-    if (blobStore.kind !== 's3') throw new Error('config.toml: blob_store.kind must be "s3" (B2 in production)');
-    required(blobStore.endpoint, 'STALWART_BLOB_ENDPOINT');
-    required(blobStore.bucket, 'STALWART_BLOB_BUCKET');
+    // M1 defaults to blobs on the mail server's own disk. fs is the new default; s3 stays available (B2 in
+    // production, MinIO in CI) with the existing variables.
+    const blobKind = String(getString('STALWART_BLOB_STORE', blob.kind || 'fs')).toLowerCase();
+    if (blobKind !== 'fs' && blobKind !== 's3') {
+        throw new Error('config.toml: blob_store.kind / STALWART_BLOB_STORE must be "fs" or "s3"');
+    }
+    let blobStore;
+    if (blobKind === 'fs') {
+        blobStore = {
+            kind: 'fs',
+            path: getString('STALWART_BLOB_PATH', blob.path || '/var/lib/openvibe-stalwart/blobs'),
+            depth: getInt('STALWART_BLOB_DEPTH', blob.depth || 2),
+        };
+        required(blobStore.path, 'STALWART_BLOB_PATH');
+        if (blobStore.depth < 0 || blobStore.depth > 5) throw new Error('STALWART_BLOB_DEPTH must be from 0 to 5');
+    } else {
+        const s3 = {
+            kind: 's3',
+            endpoint: getString('STALWART_BLOB_ENDPOINT', blob.endpoint),
+            bucket: getString('STALWART_BLOB_BUCKET', blob.bucket),
+            region: getString('STALWART_BLOB_REGION', blob.region),
+            accessKeyIdEnv: getString('STALWART_BLOB_ACCESS_KEY_ID_ENV', blob.access_key_id_env || 'STALWART_BLOB_ACCESS_KEY_ID'),
+            secretKeyEnv: getString('STALWART_BLOB_SECRET_KEY_ENV', blob.secret_key_env || 'STALWART_BLOB_SECRET_KEY'),
+            allowInvalidCerts: getBool('STALWART_BLOB_ALLOW_INVALID_CERTS', Boolean(blob.allow_invalid_certs)),
+            verifyAfterWrite: getBool('STALWART_BLOB_VERIFY_AFTER_WRITE', blob.verify_after_write !== false),
+            timeoutMs: getInt('STALWART_BLOB_TIMEOUT_MS', blob.timeout_ms || 30000),
+            maxRetries: getInt('STALWART_BLOB_MAX_RETRIES', blob.max_retries || 3),
+            keyPrefix: getString('STALWART_BLOB_KEY_PREFIX', blob.key_prefix || '') || null,
+        };
+        required(s3.endpoint, 'STALWART_BLOB_ENDPOINT');
+        required(s3.bucket, 'STALWART_BLOB_BUCKET');
+        blobStore = s3;
+    }
 
     const directory = config.directory || {};
     const spam = config.spam || {};
@@ -119,7 +135,7 @@ function render(config) {
             generated_by: 'deploy/stalwart/render.js',
             version: 1,
             server: {
-                default_hostname: envString('STALWART_DEFAULT_HOSTNAME', config.server.default_hostname),
+                default_hostname: getString('STALWART_DEFAULT_HOSTNAME', config.server.default_hostname),
             },
             domains: {
                 base,
@@ -136,8 +152,8 @@ function render(config) {
             },
             blob_store: blobStore,
             spam: {
-                enabled: envBool('STALWART_SPAM_ENABLED', spam.enabled !== false),
-                score_spam: Number(envString('STALWART_SPAM_SCORE', spam.score_spam || 5.0)),
+                enabled: getBool('STALWART_SPAM_ENABLED', spam.enabled !== false),
+                score_spam: Number(getString('STALWART_SPAM_SCORE', spam.score_spam || 5.0)),
             },
             listeners: [
                 { name: 'smtp', protocol: 'smtp', bind: [`${smtpBind}:${smtpPort}`], use_tls: true, implicit_tls: false },

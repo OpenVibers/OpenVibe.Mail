@@ -63,4 +63,22 @@ async function observedIds({ db, address }) {
     return rows.map((r) => r.message_id);
 }
 
-module.exports = { summary, observe, listForAddress, observedIds };
+/**
+ * How many messages the service has already seen for each of these addresses.
+ *
+ * This is the count of the observation table, not a walk of every mailbox: opening an address's messages or its
+ * code writes the row. It is deliberately cheap and carries no subject, sender or body — /me/mail draws a badge,
+ * it does not read mail.
+ */
+async function countsByAddress({ db, addresses = [] }) {
+    const list = [...new Set((addresses || []).filter(Boolean))];
+    if (!list.length) return new Map();
+    const rows = await db.many(sql`
+        SELECT address, count(*)::int AS messages
+          FROM mail_observed_messages
+         WHERE address = ANY(${list})
+         GROUP BY address`);
+    return new Map(rows.map((r) => [r.address, Number(r.messages) || 0]));
+}
+
+module.exports = { summary, observe, listForAddress, observedIds, countsByAddress };

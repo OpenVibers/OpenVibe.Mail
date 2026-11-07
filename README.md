@@ -14,6 +14,7 @@ the OpenVibe Seven Domains plan (2026-11-07) §8.
 | **Burners** | `q7fq2k9d@burn2.openvibe.email` — receive-only, expires after 10 minutes, 1 hour, 1 day or 7 days, or after the first message. A 10-minute burner needs no account. Its mail is deleted when it expires. |
 | **Agent inboxes** | `helper.alice@openvibe.email` — an address an agent can read, on the person's own domain. |
 | **Directory** | Stalwart's SQL directory reads `mail_directory_accounts`: every unexpired burner is its **own** account (the burner address is the primary address), so one burner's mail can never be read in another's. Masks and agent inboxes are aliases of the owner's mailbox. A disabled mask or an expired burner resolves to no row and the mail bounces. |
+| **Blobs** | Message blobs live on the mail server's local disk by default (`/var/lib/openvibe-stalwart/blobs`, `STALWART_BLOB_STORE=fs`). S3-compatible storage (B2 in production, MinIO in CI) stays available with `STALWART_BLOB_STORE=s3`. |
 
 The service stores only the addresses and metadata: message bodies are read from Stalwart over loopback JMAP when a
 code is asked for, and are never written to a log, an event or the database. A burner's account is read with no
@@ -22,16 +23,21 @@ recipient filtering at all; a mask/agent inbox in the shared person mailbox is m
 
 ## API
 
-All routes are under `/api/v1` and take an OpenVibe.Network token (`Authorization: Bearer …`). An app token must
-name the person it acts for (`on_behalf_of`) and carry `mail.addresses.write` or `mail.messages.read`. A typed token
-(a `typ` or `purpose` claim) is refused.
+All routes are under `/api/v1` and take an OpenVibe.Network token (`Authorization: Bearer …`), or the person's
+same-site session cookie on openvibe.email (set by `openvibe-sdk/sso` after sign-in; `/auth/*` is the sign-in
+handshake). A cross-origin browser may send a Bearer token from any first-party origin in the Contracts manifests
+(CORS); a cookie-authenticated **write** must come from openvibe.email itself (`Sec-Fetch-Site`/`Origin`). An app
+token must name the person it acts for (`on_behalf_of`) and carry `mail.addresses.write` or
+`mail.messages.read`. A typed token (a `typ` or `purpose` claim) is refused.
 
 | Method | Route | Who |
 |---|---|---|
-| `POST` | `/masks` | a person; `{ label, purpose }` |
+| `GET` | `/me/mail` | a person; masks, burners and agent inboxes with state, expiry and counts (see below) |
+| `POST` | `/masks` | a person; `{ purpose, expires_days?, label? }` |
 | `GET` | `/masks` | a person |
 | `GET` | `/masks/:id` | the owner; anyone else gets 404 |
-| `DELETE` | `/masks/:id` | the owner; turns the mask off |
+| `POST` | `/masks/:id/disable` | the owner; turns the mask off |
+| `DELETE` | `/masks/:id` | the same, for a DELETE-shaped client |
 | `POST` | `/burners` | a person, or nobody (`{ expires: "10m" \| "1h" \| "1d" \| "7d", first_message_only }`) |
 | `GET` | `/burners` | a person |
 | `GET` | `/burners/:id/messages` | the owner, or the holder of the returned `x-mail-burner-token` |
@@ -46,6 +52,12 @@ API returns an array of `{ id, from, subject, received_at }` and nothing else: n
 memory and never returns the body. `GET /api/ready` asks the database and Stalwart; `/api/health` is the liveness
 answer.
 
+`GET /api/v1/me/mail` is the one call the page makes: it returns `masks`, `burners` and `agent_inboxes`, where each
+item carries the Contracts resource (`mask`, `burner`, `agent_inbox`) exactly, beside the listing fields `address`,
+`purpose`, `state`, a mask's `expires_at`, and `counts.messages` (the messages the service has already seen for that
+address), plus totals under `counts`. No subject, sender, body or code is in it. A mask made with `expires_days` turns itself off when the date
+arrives; the purge job disables the due rows and the directory stops resolving them.
+
 ## Events
 
 The outbox (`event_outbox`) publishes, through OpenVibe.Events when configured:
@@ -56,9 +68,10 @@ The outbox (`event_outbox`) publishes, through OpenVibe.Events when configured:
 
 ## Contracts
 
-`mail.mask@1`, `mail.burner@1`, `mail.agent-inbox@1` and `mail.message-summary@1` are proposed as an expand-only
-minor of [OpenVibe.Contracts](https://github.com/OpenVibers/OpenVibe.Contracts). The service pins
-`openvibe-contracts` v0.327.0 until that minor is released.
+`mail.mask@1`, `mail.burner@1`, `mail.agent-inbox@1` and `mail.message-summary@1` are in
+[OpenVibe.Contracts](https://github.com/OpenVibers/OpenVibe.Contracts) v0.329.0, which this service pins. The
+`/me/mail` listing is a projection above them (state, expiry, counts) — the Contracts resources do not grow extra
+fields, and no Contracts release is made from this repository.
 
 ## Stalwart
 
@@ -72,8 +85,8 @@ node deploy/stalwart/apply.js    # reconciles the plan over loopback JMAP
 ```
 
 The plan creates the SQL directory and its queries, the base/mask/burner domains (all `allowRelaying = false`), the
-S3 blob store, the built-in spam filter, and exactly three listeners: SMTP on 25, JMAP/management and IMAP on
-loopback. Every default submission/HTTPS/POP3/Sieve listener is removed. The authentication defaults give a
+filesystem blob store (or S3 when `STALWART_BLOB_STORE=s3`), the built-in spam filter, and exactly three listeners:
+SMTP on 25, JMAP/management and IMAP on loopback. Every default submission/HTTPS/POP3/Sieve listener is removed. The authentication defaults give a
 directory-created account the `User` role — without it Stalwart creates the account and then refuses its own mail.
 
 ## Tests
@@ -81,7 +94,8 @@ directory-created account the `User` role — without it Stalwart creates the ac
 ```sh
 npm test               # unit: PGlite, an in-process Network and an in-memory mail server
 npm run test:pg        # the same through the PostgreSQL container
-npm run test:stalwart  # the acceptance run: real Stalwart + PostgreSQL + MinIO
+npm run test:stalwart  # the acceptance run: real Stalwart + PostgreSQL, fs blobs by default (MinIO with
+                       # STALWART_BLOB_STORE=s3)
 ```
 
 The acceptance run (also `test/stalwart/integration.test.js` in CI) starts the pinned binary in recovery mode so
@@ -97,7 +111,9 @@ checks:
 - an expired burner's mail is deleted, its account is removed and the address bounces;
 - mail to a disabled mask bounces;
 - another person gets 404 for a mask, burner and agent inbox;
-- a ten-minute burner works without an account and is read with its token.
+- a ten-minute burner works without an account and is read with its token;
+- the message blob is on the local disk with `STALWART_BLOB_STORE=fs` (and the same run passes with `s3` in CI);
+- the CORS allow-list, the same-site cookie write rule and the `/me/mail` listing.
 
 ## Layout
 
@@ -106,6 +122,7 @@ server/            the API, domains, Stalwart client, events and the due-based p
 migrations/        NNNN_*.sql (expand-only), including the directory view Stalwart reads
 deploy/stalwart/   config.toml, VERSION, render.js, apply.js
 deploy/systemd/    the memory-capped Stalwart slice and both units
+deploy/nginx/      openvibe.email.conf — the public door (API, health, ready, /auth)
 deploy/init-db.js  apply migrations before systemd starts the service
 test/              unit tests and the real-Stalwart acceptance test
 docs/              INSTALL.md and DNS.md

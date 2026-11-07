@@ -5,9 +5,11 @@
  * database and a stand-in for the mail server.
  *
  *   /api/health, /api/ready            the machine answers
+ *   /auth/*                            Network SSO with PKCE (openvibe-sdk/sso)
  *   /api/v1/masks, /burners, …         the API (http/api.js)
  *
- * There are no pages: M1 has no site, only an API for the apps and the agents of the house.
+ * There are no pages: M1 has no site, only an API for the apps and the agents of the house. nginx answers `/` with
+ * a placeholder until the page lands.
  *
  * Nothing here logs a request body. A request body of this service may carry a person's label for a mask; a
  * message body never reaches this process at all, and the one place a body is read (the code extractor) throws it
@@ -22,10 +24,12 @@ const configLib = require('./config');
 const { openStore } = require('./db');
 const { createKeyStore } = require('./auth/keys');
 const { createPrincipal } = require('./http/principal');
+const { createCors } = require('./http/cors');
 const { createApi } = require('./http/api');
 const { createServiceReadiness } = require('./observability');
 const { createStalwartClient } = require('./stalwart/client');
 const { createEvents } = require('./events');
+const { createSsoClient } = require('openvibe-sdk/sso');
 
 const VERSION = require('../package.json').version;
 
@@ -42,6 +46,22 @@ async function createApp(opts = {}) {
     const stalwart = opts.stalwart || createStalwartClient({ config, fetchImpl, log });
     const events = opts.events || createEvents({ db: store.db, config, now: opts.now, log });
     const principal = createPrincipal({ config, keys });
+    const sso = opts.sso || createSsoClient({
+        site: 'mail',
+        siteName: 'OpenVibe.Mail',
+        baseUrl: config.baseUrl,
+        clientId: config.oauth.clientId,
+        clientSecret: config.oauth.clientSecret,
+        redirectUri: config.oauth.redirectUri,
+        scope: config.oauth.scope,
+        networkUrl: config.network.url,
+        networkInternalUrl: config.network.internalUrl,
+        issuer: config.network.issuer,
+        audience: [config.network.sessionAudience],
+        secureCookies: config.cookies.secure,
+        fetch: fetchImpl,
+        log,
+    });
 
     const app = express();
     app.disable('x-powered-by');
@@ -50,11 +70,35 @@ async function createApp(opts = {}) {
     app.use(contracts.http.middleware());
     app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
     app.use(express.json({ limit: '16kb' }));
+    // Nothing here is cacheable: a person's addresses and sign-in are private, and a machine answer is live.
+    app.use(['/api', '/auth'], (_req, res, next) => {
+        res.set('Cache-Control', 'no-store');
+        next();
+    });
 
     app.get('/api/health', (_req, res) => res.json({ status: 'ok', service: 'openvibe-mail', name: 'OpenVibe.Mail', version: VERSION }));
 
     const readiness = createServiceReadiness({ db: store.db, config, stalwart, version: VERSION });
     app.get('/api/ready', readiness.handler);
+
+    // Sign-in with OpenVibe.Network (openvibe-sdk/sso): /auth/login, /auth/callback, /auth/me, /auth/logout. The
+    // session lives in the SDK's host-only ov_token cookie on openvibe.email. A request that already carries a
+    // Bearer token is judged by that token alone, so the cookie is not even read for it.
+    app.use((req, res, next) => (req.headers.authorization ? next() : sso.optionalAuth()(req, res, next)));
+    app.use('/auth', rateLimit({
+        windowMs: 15 * 60_000,
+        limit: 60,
+        standardHeaders: true,
+        legacyHeaders: false,
+        handler: (req, res) => contracts.http.sendProblem(res, 429, 'rate_limited', {
+            detail: 'Too many sign-in requests from this address; retry shortly.',
+            ctx: req.ov,
+        }),
+    }));
+    app.use('/auth', sso.router(express));
+
+    // CORS: a Bearer token may be sent from any first-party origin in the manifests; a cookie may not cross sites.
+    app.use('/api/v1', createCors({ baseUrl: config.baseUrl }));
 
     app.use('/api/v1', rateLimit({
         windowMs: 60_000,
@@ -89,7 +133,7 @@ async function createApp(opts = {}) {
         return contracts.http.sendProblem(res, 500, 'internal.error', { detail: 'Internal error.', ctx: req.ov });
     });
 
-    return { app, ctx: { config, store, keys, stalwart, events, principal, log } };
+    return { app, ctx: { config, store, keys, stalwart, events, principal, sso, log } };
 }
 
 module.exports = { createApp, VERSION };

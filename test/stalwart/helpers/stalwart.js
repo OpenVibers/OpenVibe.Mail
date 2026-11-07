@@ -1,12 +1,14 @@
 'use strict';
 
 /**
- * Start the pinned Stalwart binary against the test PostgreSQL and MinIO, render and apply the repository's own
- * configuration, and wait until it answers.
+ * Start the pinned Stalwart binary against the test PostgreSQL, render and apply the repository's own configuration,
+ * and wait until it answers.
  *
- * The binary is downloaded and checksum-verified by CI (`.github/workflows/ci.yml`); locally set STALWART_BIN to
- * the binary you fetched. Nothing here writes a secret to disk: the rendered config.json names an environment
- * variable for the database password, and apply.js reads the S3 keys from the environment.
+ * Blobs go to a temporary local directory by default (M1's fs store); set STALWART_BLOB_STORE=s3 to run the same
+ * acceptance test against MinIO. The binary is downloaded and checksum-verified by CI
+ * (`.github/workflows/ci.yml`); locally set STALWART_BIN to the binary you fetched. Nothing here writes a secret to
+ * disk: the rendered config.json names an environment variable for the database password, and apply.js reads the
+ * S3 keys from the environment only when the S3 store is selected.
  */
 const fs = require('fs');
 const os = require('os');
@@ -40,6 +42,8 @@ function testEnv(overrides = {}) {
         STALWART_URL: 'http://127.0.0.1:18080',
         STALWART_ADMIN_USER: 'admin',
         STALWART_ADMIN_PASSWORD: 'ov-test-admin-password',
+        STALWART_BLOB_STORE: process.env.STALWART_BLOB_STORE || 'fs',
+        STALWART_BLOB_PATH: process.env.STALWART_BLOB_PATH || '',
         ...overrides,
     };
 }
@@ -80,11 +84,18 @@ async function disableInboundThrottles(client) {
 async function start({ env = testEnv(), binary = null } = {}) {
     const bin = binary || binaryPath(env);
     if (!fs.existsSync(bin)) throw new Error(`STALWART_BIN not found: ${bin} (download the pinned release first)`);
-    for (const name of ['STALWART_BLOB_ENDPOINT', 'STALWART_BLOB_BUCKET', 'STALWART_BLOB_ACCESS_KEY_ID', 'STALWART_BLOB_SECRET_KEY']) {
-        if (!env[name]) throw new Error(`${name} is not set: the integration test needs the S3/MinIO target`);
+    const blobStore = String(env.STALWART_BLOB_STORE || 'fs').toLowerCase();
+    if (blobStore === 's3') {
+        for (const name of ['STALWART_BLOB_ENDPOINT', 'STALWART_BLOB_BUCKET', 'STALWART_BLOB_ACCESS_KEY_ID', 'STALWART_BLOB_SECRET_KEY']) {
+            if (!env[name]) throw new Error(`${name} is not set: the s3 acceptance run needs the S3/MinIO target`);
+        }
     }
 
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ov-mail-stalwart-'));
+    const blobDir = blobStore === 'fs'
+        ? (env.STALWART_BLOB_PATH || fs.mkdtempSync(path.join(os.tmpdir(), 'ov-mail-blobs-')))
+        : null;
+    if (blobDir) env = { ...env, STALWART_BLOB_PATH: blobDir };
     execFileSync(process.execPath, [path.join(ROOT, 'deploy', 'stalwart', 'render.js'), '--out', dir], { env, stdio: 'pipe' });
     const plan = JSON.parse(fs.readFileSync(path.join(dir, 'plan.json'), 'utf8'));
 
@@ -175,6 +186,7 @@ async function start({ env = testEnv(), binary = null } = {}) {
     return {
         child: childState.child,
         dir,
+        blobDir,
         logs,
         url,
         smtpPort: Number(env.STALWART_SMTP_PORT),
@@ -184,6 +196,7 @@ async function start({ env = testEnv(), binary = null } = {}) {
         async stop() {
             await stopState(childState);
             fs.rmSync(dir, { recursive: true, force: true });
+            if (blobDir) fs.rmSync(blobDir, { recursive: true, force: true });
         },
     };
 }

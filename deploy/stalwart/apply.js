@@ -9,7 +9,8 @@
  *   authentication points at that directory
  *   domains        the base, mask and burner domains, none allowed to relay
  *   system         the SMTP hostname and the default domain
- *   blob store     S3-compatible (B2 in production); the keys are read from the environment here, never written
+ *   blob store     local disk by default (M1), or S3-compatible (B2 in production); the S3 keys are read from the
+ *                  environment here, never written
  *   spam           the built-in filter, on
  *   listeners      SMTP on 25; JMAP/management and IMAP on loopback; every submission/POP3/Sieve/HTTPS listener gone
  *
@@ -69,6 +70,41 @@ function setProblems(label, result) {
         }
     }
     return problems;
+}
+
+/**
+ * The BlobStore JMAP object for the plan. fs writes into a directory on this host; s3 reads its two keys from the
+ * environment (never from the plan or a rendered file) and points them at the S3-compatible endpoint.
+ */
+function blobStoreFor(blob, env = process.env) {
+    const kind = String((blob && blob.kind) || 'fs').toLowerCase();
+    if (kind === 'fs') {
+        if (!blob.path) throw new Error('the fs blob store needs a path');
+        return {
+            '@type': 'FileSystem',
+            path: blob.path,
+            depth: Number.isInteger(blob.depth) ? blob.depth : 2,
+        };
+    }
+    if (kind !== 's3') throw new Error(`unknown blob store kind: ${kind}`);
+    const accessKeyId = env[blob.accessKeyIdEnv];
+    const secretKey = env[blob.secretKeyEnv];
+    if (!accessKeyId || !secretKey) {
+        throw new Error(`the blob store needs ${blob.accessKeyIdEnv} and ${blob.secretKeyEnv}`);
+    }
+    return {
+        '@type': 'S3',
+        region: { '@type': 'Custom', url: blob.endpoint, region: blob.region || 'us-east-1' },
+        bucket: blob.bucket,
+        accessKeyId: { '@type': 'Value', value: accessKeyId },
+        secretKey: { '@type': 'Value', secret: secretKey },
+        sessionToken: { '@type': 'None' },
+        timeout: blob.timeoutMs,
+        maxRetries: blob.maxRetries,
+        keyPrefix: blob.keyPrefix || undefined,
+        allowInvalidCerts: Boolean(blob.allowInvalidCerts),
+        verifyAfterWrite: blob.verifyAfterWrite !== false,
+    };
 }
 
 async function apply(plan, client, env = process.env) {
@@ -169,25 +205,7 @@ async function apply(plan, client, env = process.env) {
     problems.push(...setProblems('system', system));
 
     // ---- blob store ------------------------------------------------------------------------
-    const blob = plan.blob_store;
-    const accessKeyId = env[blob.accessKeyIdEnv];
-    const secretKey = env[blob.secretKeyEnv];
-    if (!accessKeyId || !secretKey) {
-        throw new Error(`the blob store needs ${blob.accessKeyIdEnv} and ${blob.secretKeyEnv}`);
-    }
-    const blobStore = {
-        '@type': 'S3',
-        region: { '@type': 'Custom', url: blob.endpoint, region: blob.region || 'us-east-1' },
-        bucket: blob.bucket,
-        accessKeyId: { '@type': 'Value', value: accessKeyId },
-        secretKey: { '@type': 'Value', secret: secretKey },
-        sessionToken: { '@type': 'None' },
-        timeout: blob.timeoutMs,
-        maxRetries: blob.maxRetries,
-        keyPrefix: blob.keyPrefix || undefined,
-        allowInvalidCerts: Boolean(blob.allowInvalidCerts),
-        verifyAfterWrite: blob.verifyAfterWrite !== false,
-    };
+    const blobStore = blobStoreFor(plan.blob_store, env);
     const blobResult = await client.one('x:BlobStore/set', { update: { singleton: blobStore } }, 'b');
     problems.push(...setProblems('blob store', blobResult));
 
@@ -286,4 +304,4 @@ if (require.main === module) {
     });
 }
 
-module.exports = { apply, createClient };
+module.exports = { apply, createClient, blobStoreFor };

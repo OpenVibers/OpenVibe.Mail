@@ -33,8 +33,17 @@ ssl = false
 pool_max_connections = 20
 
 [blob_store]
-# B2 in production (an S3-compatible endpoint), MinIO in CI. The endpoint is a custom S3 region to Stalwart.
-kind = "s3"
+# M1's default is the mail server's own disk: the message blobs live beside the database, under the service's
+# StateDirectory (the systemd unit already allows writes there). STALWART_BLOB_PATH overrides the directory and
+# STALWART_BLOB_DEPTH the number of hash levels; the depth must not change after blobs have been written.
+kind = "fs"
+path = "/var/lib/openvibe-stalwart/blobs"
+depth = 2
+
+# S3-compatible storage (Backblaze B2 in production, MinIO in CI) stays available:
+#   STALWART_BLOB_STORE=s3
+# The endpoint is a custom S3 region to Stalwart, and the keys are the *names* of environment variables that
+# apply.js resolves in memory. These values are used only when STALWART_BLOB_STORE=s3.
 endpoint = "https://s3.eu-central-003.backblazeb2.com"
 bucket = "openvibe-mail"
 region = "eu-central-003"

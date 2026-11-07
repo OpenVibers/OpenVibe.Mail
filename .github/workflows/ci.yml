@@ -11,7 +11,52 @@ permissions:
 
 jobs:
   test:
-    name: unit and Stalwart acceptance
+    name: unit and Stalwart acceptance (fs blobs)
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: ov
+          POSTGRES_PASSWORD: ov-ci-password
+          POSTGRES_DB: ov_mail
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ov -d ov_mail"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.1
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: syntax
+        run: |
+          find server scripts test deploy -name '*.js' -not -path '*/node_modules/*' -print0 \
+            | xargs -0 -n1 node --check
+      - name: unit tests (PGlite, no services)
+        run: npm test
+      - name: download the pinned Stalwart (sha256 verified)
+        run: node scripts/fetch-stalwart.js
+      - name: Stalwart acceptance (PostgreSQL + fs blobs + real SMTP)
+        env:
+          STALWART_BIN: ${{ github.workspace }}/.cache/stalwart/stalwart
+          STALWART_DB_HOST: 127.0.0.1
+          STALWART_DB_PORT: 5432
+          STALWART_DB_USER: ov
+          STALWART_DB_PASSWORD: ov-ci-password
+          STALWART_TEST_DB: ov_mail_test
+          STALWART_BLOB_STORE: fs
+        run: npm run test:stalwart
+
+  # The second half of the blob-store promise: the same acceptance run against an S3-compatible store (MinIO),
+  # which is what B2 is in production. It runs beside the fs job, so it costs one runner and no serial time.
+  test-s3:
+    name: Stalwart acceptance (s3 blobs)
     runs-on: ubuntu-24.04
     services:
       postgres:
@@ -46,12 +91,6 @@ jobs:
           node-version: 22.22.1
           cache: npm
       - run: npm ci --no-audit --no-fund
-      - name: syntax
-        run: |
-          find server scripts test deploy -name '*.js' -not -path '*/node_modules/*' -print0 \
-            | xargs -0 -n1 node --check
-      - name: unit tests (PGlite, no services)
-        run: npm test
       - name: download the pinned Stalwart (sha256 verified)
         run: node scripts/fetch-stalwart.js
       - name: Stalwart acceptance (PostgreSQL + MinIO + real SMTP)
@@ -62,6 +101,7 @@ jobs:
           STALWART_DB_USER: ov
           STALWART_DB_PASSWORD: ov-ci-password
           STALWART_TEST_DB: ov_mail_test
+          STALWART_BLOB_STORE: s3
           STALWART_BLOB_ENDPOINT: http://127.0.0.1:9000
           STALWART_BLOB_BUCKET: ov-mail
           STALWART_BLOB_REGION: us-east-1

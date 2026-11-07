@@ -13,6 +13,7 @@
 const { sql } = require('openvibe-sdk/db');
 const { staleCounters } = require('../domain/limits');
 const { observe } = require('../domain/messages');
+const { disableDueMasks } = require('../domain/masks');
 
 const LEASE_KEY = 'purge_lease';
 const LEASE_MS = 30_000;
@@ -84,7 +85,7 @@ async function purgeBurner({ db, stalwart, burner }) {
  * Returns what it did, so the run can be logged without saying anything about the mail itself.
  */
 async function runDue({ db, stalwart, events, now = () => Date.now(), log = console } = {}) {
-    const report = { expired: 0, messagesDeleted: 0, consumed: 0, counters: 0, skipped: false };
+    const report = { expired: 0, messagesDeleted: 0, masksDisabled: 0, consumed: 0, counters: 0, skipped: false };
     const held = await db.tx(async (t) => takeLease(t, { now: now() }));
     if (!held) {
         report.skipped = true;
@@ -109,6 +110,14 @@ async function runDue({ db, stalwart, events, now = () => Date.now(), log = cons
         } catch (err) {
             (log.warn || log.log).call(log, `[mail] the mail server did not take the expiry cache notice: ${err && err.message}`);
         }
+    }
+
+    // A mask with a date stops resolving on that date. It is the same due-based rule: only the rows whose
+    // expires_at has passed are touched, and the mail server is told once (disableDueMasks does that).
+    try {
+        report.masksDisabled = await disableDueMasks({ db, stalwart, now });
+    } catch (err) {
+        (log.warn || log.log).call(log, `[mail] the due masks were not disabled: ${err && err.message}`);
     }
 
     const waiting = await db.tx(async (t) => waitingBurners(t));
@@ -146,8 +155,8 @@ function startPurgeJob({ db, stalwart, events, intervalMs = 60_000, now = () => 
         if (stopped) return;
         try {
             const report = await runDue({ db, stalwart, events, now, log });
-            if (!report.skipped && (report.expired || report.consumed)) {
-                (log.info || log.log).call(log, `[mail] purge: ${report.expired} burners expired, ${report.messagesDeleted} messages deleted`);
+            if (!report.skipped && (report.expired || report.masksDisabled || report.consumed)) {
+                (log.info || log.log).call(log, `[mail] purge: ${report.expired} burners expired, ${report.masksDisabled} masks disabled, ${report.messagesDeleted} messages deleted`);
             }
         } catch (err) {
             (log.warn || log.log).call(log, `[mail] the purge job failed: ${err && err.message}`);
