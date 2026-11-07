@@ -1,0 +1,56 @@
+/* OpenVibe.Email (Opus, 11-07). The house's dark surfaces from Shared's theme; one accent, the burner as the hero. */
+/* The skip link: off screen until a keyboard reaches it. */
+.skip { position: absolute; left: -9999px; top: 8px; z-index: 1000; padding: 8px 14px; border-radius: 10px; background: var(--accent-strong, #3472d8); color: #fff; font-weight: 700; }
+.skip:focus { left: 12px; }
+.ml-wrap { max-width: 880px; margin: 0 auto; padding: 32px max(16px, env(safe-area-inset-left, 0px)) 56px max(16px, env(safe-area-inset-right, 0px)); display: grid; gap: 28px; }
+.ml-head { display: grid; gap: 10px; }
+.ml-kicker { margin: 0; font-size: .78rem; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; color: var(--accent, #3b82f6); }
+.ml-head h1 { margin: 0; font-size: clamp(1.9rem, 5.5vw, 2.8rem); line-height: 1.08; letter-spacing: -.02em; text-wrap: balance; }
+.ml-lead { margin: 0; max-width: 60ch; font-size: 1.05rem; line-height: 1.55; color: var(--text-secondary, #96a7c2); }
+
+/* The ten-minute address: one big panel. */
+.ml-burner { position: relative; display: grid; gap: 16px; padding: 22px; border-radius: 22px; overflow: hidden;
+    border: 1px solid color-mix(in srgb, var(--accent, #3b82f6) 35%, var(--border, #1f2d47));
+    background: radial-gradient(120% 140% at 0% 0%, color-mix(in srgb, var(--accent, #3b82f6) 16%, transparent), transparent 60%), var(--bg-card, #0f1729); }
+.ml-burner h2 { margin: 0; font-size: 1.15rem; }
+.ml-burner p { margin: 0; color: var(--text-secondary, #96a7c2); line-height: 1.5; }
+.ml-start { display: grid; gap: 12px; justify-items: start; }
+.ml-start[hidden], .ml-box[hidden], .ml-code[hidden], .ml-wait[hidden], .ml-problem[hidden] { display: none; }
+.ml-btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 48px; padding: 0 20px; border: 0; border-radius: 999px;
+    background: var(--accent-strong, #3472d8); color: var(--on-accent-strong, #fff); font: inherit; font-weight: 800; cursor: pointer; }
+.ml-btn:disabled { opacity: .6; cursor: default; }
+.ml-btn-quiet { min-height: 40px; padding: 0 14px; background: color-mix(in srgb, var(--text-primary, #e6edf7) 8%, transparent); color: var(--text-primary, #e6edf7); font-weight: 700; }
+.ml-box { display: grid; gap: 14px; }
+.ml-addr-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.ml-addr { flex: 1 1 260px; min-width: 0; padding: 14px 16px; border-radius: 14px; background: var(--bg-input, #0d1424); border: 1px solid var(--border, #1f2d47);
+    font: 600 clamp(.95rem, 3.6vw, 1.15rem)/1.3 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow-wrap: anywhere; color: var(--text-primary, #e6edf7); user-select: all; }
+.ml-left { font-variant-numeric: tabular-nums; font-weight: 700; color: var(--text-secondary, #96a7c2); }
+.ml-wait { display: flex; align-items: center; gap: 10px; color: var(--text-secondary, #96a7c2); }
+.ml-wait::before { content: ""; width: 9px; height: 9px; border-radius: 50%; background: var(--accent, #3b82f6); }
+.ml-code { display: grid; gap: 8px; padding: 16px; border-radius: 16px; background: color-mix(in srgb, #22c55e 12%, var(--bg-input, #0d1424)); border: 1px solid color-mix(in srgb, #22c55e 40%, transparent); }
+.ml-code-row { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.ml-code-text { font: 800 clamp(1.6rem, 8vw, 2.4rem)/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing: .12em; color: var(--text-primary, #e6edf7); }
+.ml-code small { color: var(--text-secondary, #96a7c2); }
+.ml-problem { color: var(--danger-text, #f26262); font-weight: 600; }
+.ml-fine { font-size: .85rem; color: var(--text-muted, #7386a3); }
+
+/* What else it does: three plain cards, the house's even grid. */
+.ml-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: 12px; }
+.ml-card { display: grid; gap: 6px; padding: 18px; border-radius: 18px; border: 1px solid var(--border, #1f2d47); background: var(--bg-card, #0f1729); }
+.ml-card h3 { margin: 0; font-size: 1rem; }
+.ml-card p { margin: 0; font-size: .92rem; line-height: 1.5; color: var(--text-secondary, #96a7c2); }
+.ml-card .ml-soon { justify-self: start; padding: 2px 8px; border-radius: 999px; font-size: .72rem; font-weight: 800; color: var(--text-secondary, #96a7c2); background: color-mix(in srgb, var(--text-primary, #e6edf7) 8%, transparent); }
+.ml-rules { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.ml-rules li { display: flex; gap: 10px; color: var(--text-secondary, #96a7c2); line-height: 1.5; }
+.ml-rules li::before { content: "✓"; color: #22c55e; font-weight: 800; }
+/* Your addresses (signed in): one row each, the kind, the address, its state and how many messages came. */
+.ml-mine[hidden] { display: none; }
+.ml-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.ml-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px 12px; padding: 12px 14px; border-radius: 14px; border: 1px solid var(--border, #1f2d47); background: var(--bg-card, #0f1729); }
+.ml-row-addr { min-width: 0; font: 600 .95rem/1.3 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow-wrap: anywhere; }
+.ml-row-meta { grid-column: 1; font-size: .82rem; color: var(--text-secondary, #96a7c2); }
+.ml-row-state { grid-column: 2; grid-row: 1 / span 2; justify-self: end; padding: 2px 10px; border-radius: 999px; font-size: .75rem; font-weight: 800; background: color-mix(in srgb, var(--text-primary, #e6edf7) 8%, transparent); color: var(--text-secondary, #96a7c2); }
+.ml-row-state.is-on { background: color-mix(in srgb, #22c55e 16%, transparent); color: #22c55e; }
+.ml-h2 { margin: 0 0 10px; font-size: 1.05rem; }
+.ml-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+@media (prefers-reduced-motion: reduce) { .ml-btn { transition: none; } }

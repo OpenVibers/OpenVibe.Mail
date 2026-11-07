@@ -114,6 +114,9 @@ async function createApp(opts = {}) {
     app.use('/api/v1', principal.middleware);
     app.use(createApi({ db: store.db, config, stalwart, events, principal, log }));
 
+    // openvibe.email's page, its files and Shared's (server/http/pages.js).
+    require('./http/pages').mountPages(app, { config });
+
     app.use('/api', (req, res) => contracts.http.sendProblem(res, 404, 'route.not_found', {
         detail: 'No such API route.',
         ctx: req.ov,
