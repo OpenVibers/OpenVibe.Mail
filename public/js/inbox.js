@@ -61,8 +61,11 @@
       var b = el('button', 'ib-addr' + (current === a.address ? ' is-on' : ''));
       b.type = 'button';
       b.setAttribute('aria-pressed', current === a.address ? 'true' : 'false');
-      b.appendChild(el('span', 'ib-addr-name', a.kind === 'all' ? 'All mail' : (a.label || a.address)));
-      if (a.kind !== 'all') b.appendChild(el('span', 'ib-addr-sub', (KIND[a.kind] || 'Address') + (a.label ? ' · ' + a.address : '') + (a.enabled === false ? ' · off' : '')));
+      // The mailbox is "Your mailbox" with its address under it (the address is long and says nothing first).
+      var name = a.kind === 'all' ? 'All mail' : a.kind === 'mailbox' ? 'Your mailbox' : (a.label || a.address);
+      b.appendChild(el('span', 'ib-addr-name', name));
+      if (a.kind === 'mailbox') b.appendChild(el('span', 'ib-addr-sub', a.address));
+      else if (a.kind !== 'all') b.appendChild(el('span', 'ib-addr-sub', (KIND[a.kind] || 'Address') + (a.label ? ' · ' + a.address : '') + (a.enabled === false ? ' · off' : '')));
       b.addEventListener('click', function () { current = a.address; cursor = null; rows = []; paintSide(); loadList(); showRead(false); });
       li.appendChild(b);
       ul.appendChild(li);
