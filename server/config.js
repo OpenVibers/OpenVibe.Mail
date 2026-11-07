@@ -109,6 +109,7 @@ function load(overrides = null) {
         limits: {
             maxMasks: int('MAIL_MAX_MASKS', 20),
             maxLiveBurners: int('MAIL_MAX_LIVE_BURNERS', 5),
+            maxLiveAnonBurners: int('MAIL_MAX_LIVE_ANON_BURNERS', 2000),
             burnersPerIpHour: int('MAIL_BURNERS_PER_IP_HOUR', 10),
             anonBurnerTtlMinutes: int('MAIL_ANON_BURNER_TTL_MINUTES', 10),
             apiPerMinute: int('MAIL_API_RATE_LIMIT_PER_MIN', 240),

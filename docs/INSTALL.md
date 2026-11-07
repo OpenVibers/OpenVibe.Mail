@@ -36,6 +36,22 @@ SQL
 `ov_mail` is both the service's database and Stalwart's data store. Stalwart creates its own tables in `public`;
 the service's migrations create `mail_*` and the directory view. They share the database on purpose.
 
+### The directory shape (M1)
+
+`mail_directory_accounts` is the only thing Stalwart reads to decide who an address is:
+
+- **Every burner is its own account.** The row's `name` is the burner address itself, anonymous or owned. One
+  burner's mail can never appear in another burner's mailbox, and the service reads that account with no recipient
+  filtering at all. The purge job deletes the messages, destroys the account and removes the row together.
+- **Masks and agent inboxes are aliases of the person's mailbox.** Their row's `name` is the owner's mailbox
+  address and the address is listed by `queryEmailAliases`. The service matches each message against the **first**
+  `Delivered-To` header — the one Stalwart stamps at delivery — never against a sender-written To, Cc or
+  Delivered-To.
+- There is **no pool mailbox**; a burner's account is the isolation boundary. The only `mail_settings` row left is
+  the purge lease.
+- A disabled mask, an expired burner and a burner that took its one message resolve to no row, so the mail server
+  refuses the address.
+
 ## 2. Blob store
 
 Create the bucket and an application key in B2. Note the endpoint (for example
@@ -88,6 +104,7 @@ OV_NETWORK_INTERNAL_URL=http://127.0.0.1:4000
 MAIL_BASE_DOMAIN=openvibe.email
 MAIL_MASK_DOMAIN=mask.openvibe.email
 BURNER_DOMAINS=burn1.openvibe.email,burn2.openvibe.email,burn3.openvibe.email
+MAIL_MAX_LIVE_ANON_BURNERS=2000
 STALWART_URL=http://127.0.0.1:8080
 STALWART_ADMIN_USER=admin
 STALWART_ADMIN_PASSWORD=REPLACE_WITH_THE_RECOVERY_ADMIN_PASSWORD

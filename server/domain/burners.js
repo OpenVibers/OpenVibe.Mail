@@ -6,18 +6,20 @@
  * A burner exists to receive one thing — a verification code, a newsletter, a receipt — and to be gone afterwards.
  * It has an expiry, and when it expires its mail is deleted: not archived, not hidden, deleted.
  *
- * A burner may be made without an account. That is the ten-minute burner, and it is the reason for the two limits
- * in front of it: ten an hour from one address, and five alive at once for a person who has an account.
+ * A burner may be made without an account. That is the ten-minute burner, and it is the reason for the limits in
+ * front of it: ten an hour from one address, a global cap on live anonymous burners, and five alive at once for a
+ * person who has an account.
  *
- * The mail of a burner made without an account goes to the service's own pool mailbox. The service tells the
- * messages apart by the address they were sent to, so one letter cannot be read as another's.
+ * Every burner is its own Stalwart directory account, anonymous or owned. The mail server isolates it; the service
+ * reads that account's mailbox with no recipient matching at all, so no sender-written header can move a message
+ * from one burner to another.
  */
 const crypto = require('crypto');
 const { sql } = require('openvibe-sdk/db');
 const { ids } = require('openvibe-contracts');
 const { burnerAddress } = require('./addresses');
-const { ensureOwnerMailbox, mailboxAddressFor, poolAddress } = require('./mailboxes');
-const { countLiveBurners, bump } = require('./limits');
+const { ensureOwnerMailbox } = require('./mailboxes');
+const { countLiveBurners, countLiveAnonBurners, bump } = require('./limits');
 const { listForAddress, observe } = require('./messages');
 const { extractCode } = require('../stalwart/code');
 
@@ -91,7 +93,15 @@ async function createBurner({
                 throw err;
             }
         } else {
-            // The anonymous limit is counted by the address the request came from.
+            // A global ceiling first, so one person or a botnet cannot fill the database with live anonymous rows;
+            // then the per-IP creation limit.
+            const liveAnon = await countLiveAnonBurners(t);
+            if (liveAnon >= config.limits.maxLiveAnonBurners) {
+                const err = new Error('the anonymous burner capacity is full; try again later');
+                err.code = 'mail.burner_capacity';
+                err.status = 503;
+                throw err;
+            }
             const { count } = await bump(t, { key: `burner:ip:${ip || 'unknown'}`, windowMs: 60 * 60 * 1000 });
             if (count > config.limits.burnersPerIpHour) {
                 const err = new Error('too many burners from this address; try again later');
@@ -161,10 +171,9 @@ async function authorizeBurner({ db, id, owner = null, token = null }) {
     return null;
 }
 
-/** Where the mail of this burner lands: the person's mailbox, or the pool mailbox. */
-async function mailboxOf({ db, burner }) {
-    if (burner.owner_subject) return mailboxAddressFor(db, burner.owner_subject);
-    return poolAddress(db);
+/** The mailbox of a burner: its own directory account, addressed by the burner address itself. */
+async function mailboxOf({ burner }) {
+    return burner.address;
 }
 
 /**
@@ -192,9 +201,9 @@ async function consumeIfFirstOnly({ db, stalwart, burner, messages = [] }) {
     return true;
 }
 
-/** The messages sent to a burner, newest first. */
+/** The messages sent to a burner, newest first. The whole account belongs to this one burner. */
 async function burnerMessages({ db, stalwart, events, burner, limit = 20 }) {
-    const mailbox = await mailboxOf({ db, burner });
+    const mailbox = await mailboxOf({ burner });
     const messages = await listForAddress({
         db,
         stalwart,
@@ -202,6 +211,7 @@ async function burnerMessages({ db, stalwart, events, burner, limit = 20 }) {
         owner: burner.owner_subject || null,
         address: burner.address,
         mailbox,
+        recipient: null,
         limit,
     });
     await consumeIfFirstOnly({ db, stalwart, burner, messages });
@@ -215,9 +225,11 @@ async function burnerMessages({ db, stalwart, events, burner, limit = 20 }) {
  * anywhere. A message without a code gives no code.
  */
 async function burnerCode({ db, stalwart, events, burner }) {
-    const mailbox = await mailboxOf({ db, burner });
+    const mailbox = await mailboxOf({ burner });
     if (!mailbox) return null;
-    const messages = await stalwart.listMessages({ mailboxAddress: mailbox, recipient: burner.address, limit: 5 });
+    // No recipient filtering: the account is the burner. A sender's To/Cc/Delivered-To cannot choose another
+    // burner's mailbox, and the account is never shared with another address.
+    const messages = await stalwart.listMessages({ mailboxAddress: mailbox, limit: 5 });
     if (!messages.length) return null;
     await observe({ db, events, owner: burner.owner_subject || null, address: burner.address, messages });
     await consumeIfFirstOnly({ db, stalwart, burner, messages });

@@ -125,6 +125,7 @@ async function agentInboxMessages({ db, stalwart, events, inbox, limit = 20 }) {
         owner,
         address: inbox.address,
         mailbox,
+        recipient: inbox.address,
         limit,
     });
 }

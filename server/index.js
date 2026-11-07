@@ -3,16 +3,15 @@
 /**
  * OpenVibe.Mail — the process.
  *
- * The order is the order of the dependencies: the database first (the schema is applied at boot), then the pool
- * mailbox (the directory view reads it), then the mail server (the domains have to be known before the first
- * message arrives), then the events relay and the purge job, and only then the door.
+ * The order is the order of the dependencies: the database first (the schema is applied at boot), then the mail
+ * server (the domains have to be known before the first message arrives), then the events relay and the purge job,
+ * and only then the door. There is no pool mailbox: every burner is its own directory account.
  */
 const configLib = require('./config');
 const { openStore } = require('./db');
 const { createApp } = require('./app');
 const { createEvents } = require('./events');
 const { createStalwartClient } = require('./stalwart/client');
-const { ensurePoolMailbox, setPoolAddress } = require('./domain/mailboxes');
 const { startPurgeJob } = require('./jobs/purge');
 
 async function main() {
@@ -21,13 +20,6 @@ async function main() {
 
     const store = await openStore(config, { log });
     const db = store.db;
-
-    // The pool mailbox: where the mail of a burner made without an account goes.
-    const pool = await db.tx(async (t) => {
-        const address = await ensurePoolMailbox(t, { baseDomain: config.addresses.base });
-        await setPoolAddress(t, address);
-        return address;
-    });
 
     const stalwart = createStalwartClient({ config, log });
 
@@ -57,7 +49,7 @@ async function main() {
     const { app } = await createApp({ config, store, stalwart, events, log });
 
     const server = app.listen(config.port, config.host, () => {
-        log.info(`[OpenVibe.Mail] listening on ${config.host}:${config.port} (pool mailbox ${pool})`);
+        log.info(`[OpenVibe.Mail] listening on ${config.host}:${config.port}`);
     });
 
     const shutdown = async (signal) => {

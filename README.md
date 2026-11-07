@@ -13,10 +13,12 @@ the OpenVibe Seven Domains plan (2026-11-07) §8.
 | **Masks** | `amazon.k7fq@mask.openvibe.email` — a per-site address that delivers into your OpenVibe mailbox and nowhere else. Turn it off and it bounces. |
 | **Burners** | `q7fq2k9d@burn2.openvibe.email` — receive-only, expires after 10 minutes, 1 hour, 1 day or 7 days, or after the first message. A 10-minute burner needs no account. Its mail is deleted when it expires. |
 | **Agent inboxes** | `helper.alice@openvibe.email` — an address an agent can read, on the person's own domain. |
-| **Directory** | Stalwart's SQL directory reads `mail_directory_accounts`: the mailbox itself, every active mask, every unexpired burner and every agent inbox resolves to its owner's mailbox; a disabled mask or an expired burner resolves to no row and the mail bounces. |
+| **Directory** | Stalwart's SQL directory reads `mail_directory_accounts`: every unexpired burner is its **own** account (the burner address is the primary address), so one burner's mail can never be read in another's. Masks and agent inboxes are aliases of the owner's mailbox. A disabled mask or an expired burner resolves to no row and the mail bounces. |
 
 The service stores only the addresses and metadata: message bodies are read from Stalwart over loopback JMAP when a
-code is asked for, and are never written to a log, an event or the database.
+code is asked for, and are never written to a log, an event or the database. A burner's account is read with no
+recipient filtering at all; a mask/agent inbox in the shared person mailbox is matched only against the first
+`Delivered-To` header, the one Stalwart stamps — never a sender-written To, Cc or Delivered-To.
 
 ## API
 
@@ -38,9 +40,11 @@ name the person it acts for (`on_behalf_of`) and carry `mail.addresses.write` or
 | `GET` | `/agent-inboxes` | a person |
 | `GET` | `/agent-inboxes/:id/messages` | the owner |
 
-Somebody else's mask, burner or inbox answers **404**, never 403: the answer must not say it exists. A message
-summary is `{ id, from, subject, received_at }` — no preview, no body. `GET /api/ready` asks the database and
-Stalwart; `/api/health` is the liveness answer.
+Somebody else's mask, burner or inbox answers **404**, never 403: the answer must not say it exists. The messages
+API returns an array of `{ id, from, subject, received_at }` and nothing else: no preview, no body, no HTML. The
+`/code` endpoint returns `{ code, message_id, received_at, from }`; it extracts the code from text or HTML in
+memory and never returns the body. `GET /api/ready` asks the database and Stalwart; `/api/health` is the liveness
+answer.
 
 ## Events
 
@@ -85,8 +89,12 @@ its default listeners do not collide with the test ports, applies the plan, rest
 checks:
 
 - SMTP to a burner lands, `/code` returns the code, and no body or code reaches the service log;
+- a message to burner A with forged To, Cc and Delivered-To naming burner B never appears in B's messages or
+  `/code`;
+- 300 messages to burner A do not hide burner B's one message (each burner is its own account);
+- a forged Delivered-To does not move mail between two agent inboxes on one person's mailbox;
 - a first-message-only burner refuses the second message;
-- an expired burner's mail is deleted and the address bounces;
+- an expired burner's mail is deleted, its account is removed and the address bounces;
 - mail to a disabled mask bounces;
 - another person gets 404 for a mask, burner and agent inbox;
 - a ten-minute burner works without an account and is read with its token.
@@ -105,8 +113,9 @@ docs/              INSTALL.md and DNS.md
 
 ## Limits
 
-A person has 20 masks and 5 live burners. A 10-minute (account-less) burner is capped at 10 per IP per hour. The
-counters live in PostgreSQL, so a restart does not hand out a fresh allowance.
+A person has 20 masks and 5 live burners. A 10-minute (account-less) burner is capped at 10 per IP per hour and at
+2,000 live anonymous burners globally; past the global cap the API answers 503 `mail.burner_capacity`. The counters
+live in PostgreSQL, so a restart does not hand out a fresh allowance.
 
 ## Install
 

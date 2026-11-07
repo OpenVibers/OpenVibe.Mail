@@ -22,7 +22,19 @@ async function countMasks(t, ownerSubject) {
 async function countLiveBurners(t, ownerSubject) {
     const row = await t.maybe(sql`
         SELECT count(*)::int AS n FROM mail_burners
-         WHERE owner_subject = ${ownerSubject} AND expires_at > now()`);
+         WHERE owner_subject = ${ownerSubject}
+           AND expires_at > now()
+           AND (NOT first_message_only OR first_message_at IS NULL)`);
+    return row ? row.n : 0;
+}
+
+/** The anonymous burners alive right now: the global ceiling in front of the per-IP limit. */
+async function countLiveAnonBurners(t) {
+    const row = await t.maybe(sql`
+        SELECT count(*)::int AS n FROM mail_burners
+         WHERE owner_subject IS NULL
+           AND expires_at > now()
+           AND (NOT first_message_only OR first_message_at IS NULL)`);
     return row ? row.n : 0;
 }
 
@@ -67,4 +79,4 @@ async function staleCounters(t, { windowMs = HOUR_MS } = {}) {
          WHERE window_started_at < now() - (${windowMs} * interval '1 millisecond')`);
 }
 
-module.exports = { HOUR_MS, countMasks, countLiveBurners, bump, burnersLeft, staleCounters };
+module.exports = { HOUR_MS, countMasks, countLiveBurners, countLiveAnonBurners, bump, burnersLeft, staleCounters };

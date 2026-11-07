@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * A tiny SMTP client for the integration test: enough of RFC 5321 to deliver one message and to read the code the
+ * A tiny SMTP client for the integration test: enough of RFC 5321 to deliver messages and to read the code the
  * server answers with. It is deliberately not a mail library — a test that used the service's own stack to deliver
  * the mail could hide a bug in that stack.
  */
@@ -35,52 +35,79 @@ function write(socket, line) {
     socket.write(`${line}\r\n`);
 }
 
-/**
- * Send one message. Resolves with the SMTP codes; rejects with a `refused` error (and the code) when the server
- * refuses the sender, the recipient or the data.
- */
-async function send({ host = '127.0.0.1', port, from = 'sender@example.net', to, subject = 'Hello', text = '', html = null, timeoutMs = 20_000 }) {
-    const socket = net.createConnection({ host, port });
-    socket.setTimeout(timeoutMs);
-    const close = () => { try { socket.destroy(); } catch { /* already closed */ } };
+function message(opts, index) {
+    const {
+        from = 'sender@example.net', to, subject = 'Hello', text = '', html = null,
+        toHeader = null, cc = null, extraHeaders = [],
+    } = opts;
+    const topic = typeof subject === 'function' ? subject(index) : subject;
+    const headers = [
+        `From: ${from}`,
+        `To: ${toHeader || to}`,
+        `Subject: ${topic}`,
+        `Message-ID: <${Date.now()}.${index}.${Math.random().toString(16).slice(2)}@example.net>`,
+        'MIME-Version: 1.0',
+    ];
+    if (cc) headers.push(`Cc: ${cc}`);
+    for (const header of extraHeaders) headers.push(header);
+    let body;
+    if (html) {
+        headers.push('Content-Type: text/html; charset=utf-8');
+        body = html;
+    } else {
+        headers.push('Content-Type: text/plain; charset=utf-8');
+        body = text;
+    }
+    return `${headers.join('\r\n')}\r\n\r\n${body}\r\n.\r\n`;
+}
+
+async function deliverOn(socket, opts, index) {
+    const { from = 'sender@example.net', to } = opts;
+    write(socket, `MAIL FROM:<${from}>`);
+    const sender = await readReply(socket);
+    if (sender.code >= 400) throw Object.assign(new Error(`MAIL FROM refused: ${sender.code}`), { smtp: sender });
+    write(socket, `RCPT TO:<${to}>`);
+    const recipient = await readReply(socket);
+    if (recipient.code >= 400) throw Object.assign(new Error(`RCPT TO refused: ${recipient.code}`), { smtp: recipient, refused: true });
+    write(socket, 'DATA');
+    const data = await readReply(socket);
+    if (data.code >= 400) throw Object.assign(new Error(`DATA refused: ${data.code}`), { smtp: data, refused: true });
+    socket.write(message(opts, index));
+    const accepted = await readReply(socket);
+    if (accepted.code >= 400) throw Object.assign(new Error(`the message was refused: ${accepted.code}`), { smtp: accepted, refused: true });
+    return accepted;
+}
+
+async function withSession(opts, fn) {
+    const host = opts.host || '127.0.0.1';
+    const socket = net.createConnection({ host, port: opts.port });
+    socket.setTimeout(opts.timeoutMs || 20_000);
     try {
         await readReply(socket);
         write(socket, 'EHLO test.openvibe.invalid');
         await readReply(socket);
-        write(socket, `MAIL FROM:<${from}>`);
-        const sender = await readReply(socket);
-        if (sender.code >= 400) throw Object.assign(new Error(`MAIL FROM refused: ${sender.code}`), { smtp: sender });
-        write(socket, `RCPT TO:<${to}>`);
-        const recipient = await readReply(socket);
-        if (recipient.code >= 400) throw Object.assign(new Error(`RCPT TO refused: ${recipient.code}`), { smtp: recipient, refused: true });
-        write(socket, 'DATA');
-        const data = await readReply(socket);
-        if (data.code >= 400) throw Object.assign(new Error(`DATA refused: ${data.code}`), { smtp: data, refused: true });
-
-        const headers = [
-            `From: ${from}`,
-            `To: ${to}`,
-            `Subject: ${subject}`,
-            `Message-ID: <${Date.now()}.${Math.random().toString(16).slice(2)}@example.net>`,
-            'MIME-Version: 1.0',
-        ];
-        let body;
-        if (html) {
-            headers.push('Content-Type: text/html; charset=utf-8');
-            body = html;
-        } else {
-            headers.push('Content-Type: text/plain; charset=utf-8');
-            body = text;
-        }
-        socket.write(`${headers.join('\r\n')}\r\n\r\n${body}\r\n.\r\n`);
-        const accepted = await readReply(socket);
-        if (accepted.code >= 400) throw Object.assign(new Error(`the message was refused: ${accepted.code}`), { smtp: accepted, refused: true });
+        const result = await fn(socket);
         write(socket, 'QUIT');
         await readReply(socket).catch(() => null);
-        return accepted;
+        return result;
     } finally {
-        close();
+        try { socket.destroy(); } catch { /* already closed */ }
     }
 }
 
-module.exports = { send, readReply };
+/** Send one message. Rejects with `refused` when the envelope recipient or the data is refused. */
+async function send(opts) {
+    return withSession(opts, (socket) => deliverOn(socket, opts, 0));
+}
+
+/** Send `count` messages over one connection: enough to fill a mailbox without 300 TCP handshakes. */
+async function sendMany(opts) {
+    const count = Number(opts.count) || 1;
+    return withSession(opts, async (socket) => {
+        const accepted = [];
+        for (let i = 0; i < count; i++) accepted.push(await deliverOn(socket, opts, i));
+        return accepted;
+    });
+}
+
+module.exports = { send, sendMany, readReply };

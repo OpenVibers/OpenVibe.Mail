@@ -17,7 +17,7 @@ const http = require('http');
 const { start, testEnv, waitFor, sleep } = require('./helpers/stalwart');
 const { ensureDatabase, resetSchema, urlFor } = require('./helpers/pg');
 const { ensureBucket, listKeys } = require('./helpers/s3');
-const { send } = require('./helpers/smtp');
+const { send, sendMany } = require('./helpers/smtp');
 const { startNetwork } = require('../helpers/network');
 
 const env = testEnv();
@@ -35,7 +35,6 @@ const configLib = require('../../server/config');
 const { openDb, createStore } = require('../../server/db');
 const { createApp } = require('../../server/app');
 const { createStalwartClient } = require('../../server/stalwart/client');
-const { ensurePoolMailbox, setPoolAddress } = require('../../server/domain/mailboxes');
 const { runDue } = require('../../server/jobs/purge');
 
 function captureLog() {
@@ -114,14 +113,11 @@ test.before(async () => {
         MAIL_API_RATE_LIMIT_PER_MIN: '100000',
         MAIL_MAX_MASKS: '20',
         MAIL_MAX_LIVE_BURNERS: '5',
+        MAIL_MAX_LIVE_ANON_BURNERS: '1000',
         MAIL_BURNERS_PER_IP_HOUR: '1000',
     });
     const db = await openDb(config);
     store = createStore(db);
-    await store.db.tx(async (t) => {
-        const address = await ensurePoolMailbox(t, { baseDomain: config.addresses.base });
-        await setPoolAddress(t, address);
-    });
 
     const captured = captureLog();
     logs = captured.lines;
@@ -197,6 +193,58 @@ test('a burner made for one message stops accepting after the first', async () =
     );
 });
 
+test('forged To, Cc and Delivered-To never move a message to another burner', async () => {
+    const alice = network.addUser('alice');
+    const a = (await call('POST', '/api/v1/burners', { as: alice, json: { expires: '1h' } })).body.burner;
+    const b = (await call('POST', '/api/v1/burners', { as: alice, json: { expires: '1h' } })).body.burner;
+
+    await send({
+        port: stalwart.smtpPort,
+        to: a.address,
+        toHeader: b.address,
+        cc: b.address,
+        extraHeaders: [`Delivered-To: ${b.address}`],
+        subject: 'forged headers',
+        text: 'Your verification code is 303030',
+    });
+
+    const aCode = await waitForCode(a.id, { as: alice });
+    assert.strictEqual(aCode.status, 200, 'the real recipient gets its code');
+    assert.strictEqual(aCode.body.code, '303030');
+    const bMessages = await call('GET', `/api/v1/burners/${b.id}/messages`, { as: alice });
+    assert.strictEqual(bMessages.status, 200);
+    assert.deepStrictEqual(bMessages.body.messages, [], 'the forged recipient has no message');
+    const bCode = await call('GET', `/api/v1/burners/${b.id}/code`, { as: alice });
+    assert.strictEqual(bCode.status, 404, 'the forged recipient has no code');
+});
+
+test('three hundred messages to one burner do not hide another burner\'s message', async () => {
+    const alice = network.addUser('alice');
+    const a = (await call('POST', '/api/v1/burners', { as: alice, json: { expires: '1h' } })).body.burner;
+    const b = (await call('POST', '/api/v1/burners', { as: alice, json: { expires: '1h' } })).body.burner;
+
+    // Stalwart's default MtaStageData.maxMessages is 10 per SMTP session; use 30 sessions of 10.
+    for (let batch = 0; batch < 30; batch++) {
+        await sendMany({
+            port: stalwart.smtpPort,
+            count: 10,
+            to: a.address,
+            subject: (i) => `bulk ${batch}-${i}`,
+            text: 'bulk message',
+        });
+    }
+    await send({
+        port: stalwart.smtpPort,
+        to: b.address,
+        subject: 'the one that matters',
+        text: 'Your verification code is 404040',
+    });
+
+    const code = await waitForCode(b.id, { as: alice });
+    assert.strictEqual(code.status, 200);
+    assert.strictEqual(code.body.code, '404040');
+});
+
 test('after expiry the burner bounces and its mail is deleted', async () => {
     const alice = network.addUser('alice');
     const made = await call('POST', '/api/v1/burners', { as: alice, json: { expires: '1h' } });
@@ -260,6 +308,29 @@ test('an agent inbox receives and reads its own mail', async () => {
     assert.strictEqual(messages.body.messages.length, 1);
     assert.strictEqual(messages.body.messages[0].subject, 'A question');
     assert.strictEqual(messages.body.messages[0].body, undefined);
+});
+
+test('a forged Delivered-To does not move mail between two agent inboxes on one mailbox', async () => {
+    const alice = network.addUser('alice');
+    const alpha = (await call('POST', '/api/v1/agent-inboxes', { as: alice, json: { agent_id: 'alpha' } })).body.agent_inbox;
+    const beta = (await call('POST', '/api/v1/agent-inboxes', { as: alice, json: { agent_id: 'beta' } })).body.agent_inbox;
+
+    await send({
+        port: stalwart.smtpPort,
+        to: alpha.address,
+        toHeader: beta.address,
+        cc: beta.address,
+        extraHeaders: [`Delivered-To: ${beta.address}`],
+        subject: 'for alpha',
+        text: 'What is the weather?',
+    });
+
+    const alphaMessages = await waitForAgentMessages(alpha.id, { as: alice });
+    assert.strictEqual(alphaMessages.status, 200);
+    assert.strictEqual(alphaMessages.body.messages.length, 1);
+    const betaMessages = await call('GET', `/api/v1/agent-inboxes/${beta.id}/messages`, { as: alice });
+    assert.strictEqual(betaMessages.status, 200);
+    assert.deepStrictEqual(betaMessages.body.messages, [], 'the forged headers do not reach beta');
 });
 
 test('a ten-minute burner works without an account, read with its token', async () => {

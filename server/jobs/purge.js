@@ -11,7 +11,6 @@
  * message, it stops accepting, and the mail server is told to forget what it cached.
  */
 const { sql } = require('openvibe-sdk/db');
-const { mailboxAddressFor, poolAddress } = require('../domain/mailboxes');
 const { staleCounters } = require('../domain/limits');
 const { observe } = require('../domain/messages');
 
@@ -53,20 +52,24 @@ async function waitingBurners(t, { limit = 50 } = {}) {
 }
 
 /**
- * Delete one burner's mail and the burner.
+ * Delete one burner's mail, its Stalwart account and the burner row.
  *
- * The messages are found by the address they were sent to, so a person's other mail is never touched — not even
- * when the burner shared the pool mailbox with a dozen other burners.
+ * The burner's account contains its mail and nothing else, so the delete cannot touch a person's other mail and
+ * needs no recipient matching. A failure keeps the row (and with it the next run's work): the mail must not outlive
+ * the address because the mail server was down for one minute.
  */
 async function purgeBurner({ db, stalwart, burner }) {
-    const mailbox = burner.owner_subject ? await mailboxAddressFor(db, burner.owner_subject) : await poolAddress(db);
     let deleted = 0;
-    if (mailbox && stalwart) {
-        // A failure here keeps the row (and with it the next run's work): the mail must not outlive the address
-        // because the mail server was down for one minute. Once the mail is gone, the row and its bookkeeping go
-        // in one transaction.
-        const messages = await stalwart.listMessages({ mailboxAddress: mailbox, recipient: burner.address, limit: 100 });
-        if (messages.length) deleted = await stalwart.deleteMessages({ mailboxAddress: mailbox, ids: messages.map((m) => m.id) });
+    if (stalwart) {
+        // A burner can have more than one page; delete every page before the account itself. The account destroy
+        // removes anything left, so the address cannot keep a hidden copy after the row is gone.
+        for (let page = 0; page < 200; page++) {
+            const messages = await stalwart.listMessages({ mailboxAddress: burner.address, limit: 100 });
+            if (!messages.length) break;
+            deleted += await stalwart.deleteMessages({ mailboxAddress: burner.address, ids: messages.map((m) => m.id) });
+            if (messages.length < 100) break;
+        }
+        await stalwart.destroyAccount({ mailboxAddress: burner.address });
     }
     await db.tx(async (t) => {
         await t.exec(sql`DELETE FROM mail_observed_messages WHERE address = ${burner.address}`);
@@ -109,10 +112,9 @@ async function runDue({ db, stalwart, events, now = () => Date.now(), log = cons
 
     const waiting = await db.tx(async (t) => waitingBurners(t));
     for (const burner of waiting) {
-        const mailbox = burner.owner_subject ? await mailboxAddressFor(db, burner.owner_subject) : await poolAddress(db);
-        if (!mailbox || !stalwart) continue;
+        if (!stalwart) continue;
         try {
-            const messages = await stalwart.listMessages({ mailboxAddress: mailbox, recipient: burner.address, limit: 5 });
+            const messages = await stalwart.listMessages({ mailboxAddress: burner.address, limit: 5 });
             if (!messages.length) continue;
             await observe({ db, events, owner: burner.owner_subject || null, address: burner.address, messages });
             await db.exec(sql`

@@ -1,9 +1,9 @@
 -- phase: expand
 -- OpenVibe.Mail — the service's own settings, and the events outbox.
 --
--- The settings table holds one thing today: the mailbox that receives the mail of a burner made without an account.
--- It is a row and not a constant because the directory view (0002) has to read it: an account-less burner resolves to
--- that mailbox, so its mail lands somewhere the service can read and delete when the burner expires.
+-- The settings table is small service state. It holds the purge job's lease today; the old burner-pool mailbox
+-- setting is gone because every burner is its own Stalwart directory account and the purge job reads that account
+-- directly.
 
 CREATE TABLE IF NOT EXISTS mail_settings (
     key         text PRIMARY KEY,

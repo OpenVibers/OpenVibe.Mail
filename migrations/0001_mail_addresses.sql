@@ -6,8 +6,9 @@
 -- (owner_subject, the Network subject id) except a ten-minute burner, which may be created without an account.
 --
 -- The mailbox table says where a person's mail lands: one Stalwart account per person, addressed
--- <local>@<MAIL_BASE_DOMAIN>. The directory view (0002) turns the three tables below into the rows Stalwart's SQL
--- directory reads.
+-- <local>@<MAIL_BASE_DOMAIN>. Masks and agent inboxes are aliases of that account. A burner is different: it is
+-- its own directory account, so no message can cross from one burner to another through a shared mailbox. The
+-- directory view (0002) turns the three tables below into the rows Stalwart's SQL directory reads.
 
 CREATE TABLE IF NOT EXISTS mail_mailboxes (
     owner_subject text PRIMARY KEY,

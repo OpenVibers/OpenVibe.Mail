@@ -46,12 +46,13 @@ async function observe({ db, events, owner = null, address, messages = [] }) {
 /**
  * The messages sent to one of our addresses, newest first, read from the mail server over loopback.
  *
- * `mailbox` is where the mail landed: the person's own mailbox, or the pool mailbox for a burner made without an
- * account.
+ * `mailbox` is where the mail landed. A burner passes `recipient: null` because the mailbox is the burner; a mask
+ * or agent inbox passes its address, and the Stalwart client matches it only against the envelope recipient the
+ * server stamped, never a sender-written To, Cc or Delivered-To.
  */
-async function listForAddress({ db, stalwart, events, owner = null, address, mailbox, limit = 20 }) {
+async function listForAddress({ db, stalwart, events, owner = null, address, mailbox, recipient = null, limit = 20 }) {
     if (!mailbox) return [];
-    const messages = await stalwart.listMessages({ mailboxAddress: mailbox, recipient: address, limit });
+    const messages = await stalwart.listMessages({ mailboxAddress: mailbox, recipient, limit });
     await observe({ db, events, owner, address, messages });
     return messages.map(summary);
 }

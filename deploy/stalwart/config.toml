@@ -47,14 +47,14 @@ max_retries = 3
 key_prefix = ""
 
 [directory]
-# Stalwart asks these three views who owns an address. The view is migrations/0002_directory_views.sql: a mask
-# that is on, a burner that has not expired and an agent inbox all resolve to the owner's mailbox; everything
-# else resolves to no row, and the mail server bounces it.
+# Stalwart asks these views who owns an address. The view is migrations/0002_directory_views.sql: a burner that
+# has not expired resolves to its own account (name = the burner address), while a mask or agent inbox resolves to
+# the owner's mailbox and is an alias of it. Everything else resolves to no row, and the mail server bounces it.
 description = "OpenVibe mail directory"
 query_recipient = "SELECT name, secret, description FROM mail_directory_accounts WHERE address = $1"
 query_login = "SELECT name, secret, description FROM mail_directory_accounts WHERE name = $1"
 query_member_of = "SELECT NULL::text AS member_of FROM mail_directory_accounts WHERE name = $1 AND false"
-query_email_aliases = "SELECT address FROM mail_directory_accounts WHERE name = $1"
+query_email_aliases = "SELECT address FROM mail_directory_accounts WHERE name = $1 AND address <> $1"
 
 [spam]
 # The built-in filter. M1 receives for real people, so junk is tagged rather than relayed or discarded.

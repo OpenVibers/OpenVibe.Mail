@@ -153,9 +153,8 @@ test('the code endpoint gives the code that arrived', async (t) => {
     const made = await s.post('/api/v1/burners', { as: alice, json: { expires: '1h' } });
     const burner = made.body.burner;
 
-    const mailbox = await s.db.value('SELECT address FROM mail_mailboxes WHERE owner_subject = $1', [alice.subject]);
     s.mail.deliver({
-        mailboxAddress: mailbox,
+        mailboxAddress: burner.address,
         to: burner.address,
         subject: 'Your verification code',
         text: 'Your verification code is 918273. It expires in 10 minutes.',
@@ -219,9 +218,8 @@ test('no message body is ever written to a log line', async (t) => {
 
     const made = await s.post('/api/v1/burners', { as: alice, json: { expires: '1h' } });
     const burner = made.body.burner;
-    const mailbox = await s.db.value('SELECT address FROM mail_mailboxes WHERE owner_subject = $1', [alice.subject]);
     s.mail.deliver({
-        mailboxAddress: mailbox,
+        mailboxAddress: burner.address,
         to: burner.address,
         subject: 'Your verification code',
         text: 'Your verification code is 918273. The secret phrase is hunter2 and nobody may read it.',
@@ -245,4 +243,84 @@ test('a typed token is not a session', async (t) => {
 
     const made = await s.post('/api/v1/masks', { bearer: typed, json: { label: 'Amazon' } });
     assert.strictEqual(made.status, 401);
+});
+
+test('a forged Delivered-To does not move an agent message to another inbox', async (t) => {
+    const s = await boot();
+    t.after(() => s.close());
+    const alice = s.network.addUser('alice');
+
+    const a = (await s.post('/api/v1/agent-inboxes', { as: alice, json: { agent_id: 'alpha' } })).body.agent_inbox;
+    const b = (await s.post('/api/v1/agent-inboxes', { as: alice, json: { agent_id: 'beta' } })).body.agent_inbox;
+    const mailbox = await s.db.value('SELECT address FROM mail_mailboxes WHERE owner_subject = $1', [alice.subject]);
+    s.mail.deliver({
+        mailboxAddress: mailbox,
+        to: a.address,
+        subject: 'for alpha',
+        text: 'Your code is 101010',
+        headers: [
+            { name: 'To', value: b.address },
+            { name: 'Cc', value: b.address },
+            { name: 'Delivered-To', value: b.address },
+        ],
+    });
+
+    const alpha = await s.get(`/api/v1/agent-inboxes/${a.id}/messages`, { as: alice });
+    assert.strictEqual(alpha.body.messages.length, 1);
+    const beta = await s.get(`/api/v1/agent-inboxes/${b.id}/messages`, { as: alice });
+    assert.deepStrictEqual(beta.body.messages, [], 'the forged headers name beta but the server delivered to alpha');
+});
+
+test('the messages API returns metadata and never a body or HTML', async (t) => {
+    const s = await boot();
+    t.after(() => s.close());
+    const alice = s.network.addUser('alice');
+
+    const made = await s.post('/api/v1/burners', { as: alice, json: { expires: '1h' } });
+    const burner = made.body.burner;
+    s.mail.deliver({
+        mailboxAddress: burner.address,
+        to: burner.address,
+        subject: 'Your code',
+        text: 'Your verification code is 121212',
+        html: '<p>Your verification code is <b>121212</b></p>',
+    });
+
+    const list = await s.get(`/api/v1/burners/${burner.id}/messages`, { as: alice });
+    assert.strictEqual(list.status, 200);
+    assert.deepStrictEqual(Object.keys(list.body.messages[0]).sort(), ['from', 'id', 'received_at', 'subject']);
+    assert.ok(!('body' in list.body.messages[0]) && !('html' in list.body.messages[0]) && !('preview' in list.body.messages[0]));
+
+    const code = await s.get(`/api/v1/burners/${burner.id}/code`, { as: alice });
+    assert.strictEqual(code.status, 200);
+    assert.strictEqual(code.body.code, '121212');
+    assert.ok(!('body' in code.body) && !('text' in code.body) && !('html' in code.body));
+});
+
+test('the global anonymous-burner cap answers 503 with a clear code', async (t) => {
+    const s = await boot({ env: {
+        MAIL_MAX_LIVE_ANON_BURNERS: '2',
+        MAIL_BURNERS_PER_IP_HOUR: '100',
+    } });
+    t.after(() => s.close());
+
+    assert.strictEqual((await s.post('/api/v1/burners', { json: { expires: '10m' } })).status, 201);
+    assert.strictEqual((await s.post('/api/v1/burners', { json: { expires: '10m' } })).status, 201);
+    const over = await s.post('/api/v1/burners', { json: { expires: '10m' } });
+    assert.strictEqual(over.status, 503);
+    assert.strictEqual(over.body.code, 'mail.burner_capacity');
+});
+
+test('anonymous burners are limited per IP as well as globally', async (t) => {
+    const s = await boot({ env: {
+        MAIL_MAX_LIVE_ANON_BURNERS: '100',
+        MAIL_BURNERS_PER_IP_HOUR: '2',
+    } });
+    t.after(() => s.close());
+
+    assert.strictEqual((await s.post('/api/v1/burners', { json: { expires: '10m' } })).status, 201);
+    assert.strictEqual((await s.post('/api/v1/burners', { json: { expires: '10m' } })).status, 201);
+    const over = await s.post('/api/v1/burners', { json: { expires: '10m' } });
+    assert.strictEqual(over.status, 429);
+    assert.strictEqual(over.body.code, 'mail.burner_rate');
 });

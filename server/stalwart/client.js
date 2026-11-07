@@ -68,74 +68,91 @@ function createStalwartClient({ config, fetchImpl = globalThis.fetch, log = cons
         return response.result;
     }
 
+    let domainCache = null;
+    async function domainNames() {
+        if (domainCache) return domainCache;
+        const domains = await listDomains();
+        domainCache = new Map(domains.map((d) => [String(d.id), String(d.name || '').toLowerCase()]));
+        return domainCache;
+    }
+
     /**
-     * The mail server's account id for a person's mailbox (alice@openvibe.email → the account "alice"). The
-     * account is created by the mail server itself the first time a message is delivered, so this may answer null
-     * for a person who has not received anything yet.
+     * The mail server's account id for a mailbox address. Stalwart names an account by its local part and points it
+     * at a domain, so the full address is `name@domain`; a burner and a person can share a local part on different
+     * domains. The account is created by the mail server itself when a directory row first receives mail, so this
+     * may answer null before the first message.
      */
     async function accountIdFor(mailboxAddress) {
         const key = String(mailboxAddress || '').toLowerCase();
         if (!ADDRESS_RE.test(key)) throw new StalwartError('a mailbox address is needed');
         if (accountCache.has(key)) return accountCache.get(key);
         const local = key.slice(0, key.lastIndexOf('@'));
-        const result = await one('x:Account/query', { filter: {}, limit: 500 }, 'q');
-        const ids = result.ids || [];
-        if (ids.length) {
-            const accounts = await one('x:Account/get', { ids, properties: ['id', 'name'] }, 'g');
-            const found = (accounts.list || []).find((a) => {
+        const domains = await domainNames();
+        let position = 0;
+        // An account list can be longer than one page once there are hundreds of burners. Walk it until the
+        // matching full address is found; if two accounts claim it, refuse rather than read the wrong mailbox.
+        for (let page = 0; page < 20; page++) {
+            const result = await one('x:Account/query', { filter: {}, limit: 500, position }, 'q');
+            const ids = result.ids || [];
+            if (!ids.length) return null;
+            const accounts = await one('x:Account/get', {
+                ids,
+                properties: ['id', 'name', 'domainId', 'aliases'],
+            }, 'g');
+            const matches = (accounts.list || []).filter((a) => {
                 const name = String(a.name || '').toLowerCase();
-                // Stalwart names the account by the local part; a later release may use the full address.
-                return name === local || name === key;
+                if (name.includes('@')) return name === key;
+                if (name !== local) return false;
+                const domain = a.domainId === undefined || a.domainId === null
+                    ? null
+                    : domains.get(String(a.domainId));
+                // If the server did not give the domain, one local-only match is unambiguous; more than one is not.
+                return domain ? `${name}@${domain}` === key : true;
             });
-            if (found) {
-                accountCache.set(key, found.id);
-                return found.id;
+            if (matches.length === 1) {
+                accountCache.set(key, matches[0].id);
+                return matches[0].id;
             }
+            if (matches.length > 1) return null;
+            if (ids.length < 500) return null;
+            position += ids.length;
         }
         return null;
     }
 
     /**
-     * The recipients of one message, as they are stored: the `Delivered-To` header Stalwart writes for every
-     * delivery, then the To and Cc it parsed from the message itself.
+     * The envelope recipient Stalwart stamped at delivery, and only that.
      *
-     * The header is the one that identifies a mask or burner reliably: a Bcc delivery has no To, and a message
-     * with a missing or broken To header still carries the address the SMTP envelope named. Stalwart's `to`
-     * filter only searches the parsed header, so the recipient is checked here, where both are visible.
+     * Stalwart prepends `Delivered-To` for the SMTP envelope recipient. A sender can put their own `Delivered-To`,
+     * `To` or `Cc` in the message, so the first `Delivered-To` is the only one that says where the server actually
+     * delivered. A message with no server stamp has no attributable recipient and matches nothing.
      */
-    function recipientsOf(message) {
-        const out = new Set();
-        const delivered = message['header:Delivered-To'];
-        if (delivered) {
-            for (const value of Array.isArray(delivered) ? delivered : [delivered]) {
-                const address = String(value || '').trim().toLowerCase();
-                if (address) out.add(address);
-            }
-        }
-        for (const group of [message.to, message.cc]) {
-            for (const address of group || []) {
-                if (address && address.email) out.add(String(address.email).toLowerCase());
-            }
-        }
-        return out;
+    function stampedRecipient(message) {
+        const headers = message.headers || [];
+        const first = headers.find((h) => String(h && h.name || '').toLowerCase() === 'delivered-to');
+        if (!first) return null;
+        let value = String(first.value || '').trim().toLowerCase();
+        const angle = /<([^>]+)>/.exec(value);
+        if (angle) value = angle[1].trim().toLowerCase();
+        return value || null;
     }
 
     /**
-     * The newest messages of a person's mailbox that were sent to one of our addresses. Metadata only: the id, the
-     * sender, the subject and when it arrived. There is no preview and no body: the body is read once, by the code
-     * extractor, and forgotten.
+     * The newest messages of a mailbox. Metadata only: the id, the sender, the subject and when it arrived. There
+     * is no preview and no body: the body is read once, by the code extractor, and forgotten.
      *
-     * A recipient is checked against the message's own `Delivered-To` header and its To/Cc, not left to the
-     * server's `to` filter: that filter matches only a parsed To header, and a mask may be reached through Bcc or
-     * through an alias the header never names. The scan is bounded, so a busy mailbox does not make a burner's
-     * code wait for every older letter.
+     * A burner's mailbox is the burner, so `recipient` is null and every message in the account is its own. A mask
+     * or agent inbox shares the person's mailbox, so `recipient` is set and a message is kept only when the first
+     * `Delivered-To` header — the one Stalwart stamps — names it. Sender-written To/Cc/Delivered-To is never read.
      */
     async function listMessages({ mailboxAddress, recipient = null, limit = 20 }) {
         const accountId = await accountIdFor(mailboxAddress);
         if (!accountId) return [];
-        const wanted = recipient ? String(recipient).toLowerCase() : null;
+        const wanted = recipient ? String(recipient).trim().toLowerCase() : null;
         const perPage = Math.min(Math.max(Number(limit) || 20, 1), 100);
-        const scan = wanted ? Math.min(Math.max(perPage * 5, 50), 200) : perPage;
+        // A shared mailbox needs a larger window to find an address's mail; the account never changes the answer
+        // for a burner. 500 is a bound, not a correctness rule: the match is on the server's stamp.
+        const scan = wanted ? Math.min(Math.max(perPage * 25, 100), 500) : perPage;
         const queried = await one('Email/query', {
             accountId,
             filter: {},
@@ -144,18 +161,15 @@ function createStalwartClient({ config, fetchImpl = globalThis.fetch, log = cons
         }, 'q');
         const ids = queried.ids || [];
         if (!ids.length) return [];
-        const got = await one('Email/get', {
-            accountId,
-            ids,
-            properties: ['id', 'from', 'to', 'cc', 'subject', 'receivedAt', 'keywords', 'header:Delivered-To'],
-        }, 'e');
+        const properties = ['id', 'from', 'subject', 'receivedAt', 'keywords'];
+        if (wanted) properties.push('headers');
+        const got = await one('Email/get', { accountId, ids, properties }, 'e');
         const messages = [];
         for (const m of got.list || []) {
-            if (wanted && !recipientsOf(m).has(wanted)) continue;
+            if (wanted && stampedRecipient(m) !== wanted) continue;
             messages.push({
                 id: m.id,
                 from: (m.from || []).map((a) => a.email).filter(Boolean),
-                to: (m.to || []).map((a) => a.email).filter(Boolean),
                 subject: m.subject || null,
                 receivedAt: m.receivedAt || null,
                 spam: Boolean(m.keywords && m.keywords.$junk),
@@ -166,9 +180,8 @@ function createStalwartClient({ config, fetchImpl = globalThis.fetch, log = cons
     }
 
     /**
-     * Delete messages from a mailbox: a burner's mail when it expires, and nothing else.
-     *
-     * The ids come from a query filtered by the burner's own address, so only that burner's mail goes.
+     * Delete messages from a mailbox: a burner's mail when it expires, and nothing else. A burner's mailbox is its
+     * own account, so every id in it belongs to that burner.
      */
     async function deleteMessages({ mailboxAddress, ids }) {
         const list = (ids || []).filter(Boolean);
@@ -221,6 +234,21 @@ function createStalwartClient({ config, fetchImpl = globalThis.fetch, log = cons
         return { text, html };
     }
 
+    /**
+     * Delete the Stalwart account a burner owned. The purge job removes the directory row first (so the address
+     * stops resolving), then the account's mail and, here, the empty account itself. An account that never received
+     * anything does not exist and needs no deletion.
+     */
+    async function destroyAccount({ mailboxAddress }) {
+        const key = String(mailboxAddress || '').toLowerCase();
+        const accountId = await accountIdFor(key);
+        if (!accountId) return false;
+        const result = await one('x:Account/set', { destroy: [accountId] }, 'd');
+        const destroyed = (result.destroyed || []).map(String).includes(String(accountId));
+        if (destroyed) accountCache.delete(key);
+        return destroyed;
+    }
+
     /** Forget the directory's answers, so an address that was turned off stops resolving at once. */
     async function invalidateCaches() {
         const result = await one('x:Action/set', { create: { invalidate: { '@type': 'InvalidateCaches' } } }, 'a');
@@ -246,6 +274,7 @@ function createStalwartClient({ config, fetchImpl = globalThis.fetch, log = cons
         if (refused) {
             throw new StalwartError(`the mail server refused the domain ${domain}: ${refused.description || refused.type || 'refused'}`);
         }
+        domainCache = null;
         return Boolean(result && result.created && result.created[domain]);
     }
 
@@ -264,6 +293,7 @@ function createStalwartClient({ config, fetchImpl = globalThis.fetch, log = cons
         accountIdFor,
         listMessages,
         deleteMessages,
+        destroyAccount,
         messageBody,
         invalidateCaches,
         ensureDomain,
