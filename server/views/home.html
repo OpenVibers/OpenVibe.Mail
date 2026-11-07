@@ -1,0 +1,50 @@
+<main class="ml-wrap" id="main">
+<header class="ml-head">
+<p class="ml-kicker">OpenVibe.Email</p>
+<h1>An address for every sign-up</h1>
+<p class="ml-lead">Throwaway addresses that show you the code, and inboxes your agents can read. It only receives: nothing here sends mail.</p>
+</header>
+
+<section class="ml-burner" data-mail-burner aria-labelledby="ml-burner-h">
+<h2 id="ml-burner-h">A ten-minute address</h2>
+<div class="ml-start" data-mail-start>
+<p>Use it where a site wants an email before it lets you in. The code it sends appears right here.</p>
+<button class="ml-btn" type="button">Get a 10-minute address</button>
+</div>
+<div class="ml-box" data-mail-box hidden>
+<div class="ml-addr-row"><span class="ml-addr" data-mail-address></span><button class="ml-btn ml-btn-quiet" type="button" data-mail-copy>Copy</button></div>
+<p><span class="ml-left" data-mail-left></span> · paste it into the site's form.</p>
+<p class="ml-wait" data-mail-wait role="status">Waiting for a code…</p>
+<div class="ml-code" data-mail-code hidden role="status">
+<div class="ml-code-row"><span class="ml-code-text" data-mail-code-text></span><button class="ml-btn ml-btn-quiet" type="button" data-mail-code-copy>Copy the code</button></div>
+<small data-mail-code-from></small>
+</div>
+</div>
+<p class="ml-problem" data-mail-problem role="alert" hidden></p>
+<p class="ml-fine">No account needed. The address and its mail are deleted when the ten minutes end. Only the code, the sender and the time are shown; the rest of the message is never displayed.</p>
+</section>
+
+<section class="ml-mine" data-mail-mine aria-labelledby="ml-mine-h" hidden>
+<h2 id="ml-mine-h" class="ml-h2">Your addresses</h2>
+<p class="ml-fine" data-mail-mine-empty hidden>None yet. A ten-minute address made while you are signed in, or an inbox you give an agent, shows here.</p>
+<ul class="ml-list" data-mail-mine-list></ul>
+</section>
+
+<section aria-labelledby="ml-more-h">
+<h2 id="ml-more-h" class="ml-sr">What else it does</h2>
+<div class="ml-grid">
+<article class="ml-card"><h3>Inboxes for your agents</h3><p>Give an agent its own address for sign-ups and codes, so it never needs yours. It reads only what arrives there.</p></article>
+<article class="ml-card"><h3>Masks</h3><span class="ml-soon">Later</span><p>An address per site that forwards to you, so a leak or a spammer never learns your real one. One switch turns it off.</p></article>
+<article class="ml-card"><h3>Your own inbox</h3><span class="ml-soon">Later</span><p>Real mailboxes, sending and your own domain come after this. Today it only receives.</p></article>
+</div>
+</section>
+
+<section aria-labelledby="ml-rules-h">
+<h2 id="ml-rules-h" class="ml-h2">How it treats mail</h2>
+<ul class="ml-rules">
+<li>Receive only: there is no way to send from these addresses.</li>
+<li>A message body is read only to find a code, and it is never stored outside the mailbox or shown here.</li>
+<li>Expired addresses bounce, and their mail is deleted.</li>
+</ul>
+</section>
+</main>

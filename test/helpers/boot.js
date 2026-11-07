@@ -81,6 +81,7 @@ async function boot(opts = {}) {
     }
 
     return {
+        base,
         network,
         mail,
         store,
