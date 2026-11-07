@@ -20,7 +20,11 @@ Type=simple
 User=openvibe
 Group=openvibe
 EnvironmentFile=/etc/openvibe/stalwart.env
-ExecStart=/opt/openvibe.stalwart/stalwart --config /etc/openvibe/stalwart/config.json
+# /etc/openvibe is root-only (0700): systemd reads the rendered configuration as root and hands it to the service
+# privately (LoadCredential), so the openvibe user never needs a way into /etc/openvibe. The file names the database
+# password's environment variable, never the password.
+LoadCredential=config.json:/etc/openvibe/stalwart/config.json
+ExecStart=/opt/openvibe.stalwart/stalwart --config %d/config.json
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=30
