@@ -1,0 +1,116 @@
+/* openvibe.email, your inbox (Mail M1.5, Opus's design). Desktop: addresses | the list | the message. Phone: the
+   addresses as one row of chips, then the list; a message opens as its own screen (Back returns). The house's dark
+   surfaces and one accent, as on the home page. */
+main[data-mail-inbox] {
+  --ib-card: var(--bg-card, #0f1729);
+  --ib-input: var(--bg-input, #0d1424);
+  --ib-line: var(--border, #1f2d47);
+  --ib-text: var(--text-primary, #e6edf7);
+  --ib-muted: var(--text-secondary, #96a7c2);
+  --ib-faint: var(--text-muted, #7386a3);
+  --ib-accent: var(--accent, #3b82f6);
+  --ib-strong: var(--accent-strong, #3472d8);
+  display: grid;
+  grid-template-columns: 250px minmax(300px, 380px) minmax(0, 1fr);
+  gap: 14px;
+  box-sizing: border-box;
+  height: calc(100dvh - var(--ovnav-h, 60px));
+  max-width: 1500px;
+  margin: 0 auto;
+  padding: 16px max(16px, env(safe-area-inset-right, 0px)) 16px max(16px, env(safe-area-inset-left, 0px));
+  color: var(--ib-text);
+}
+main[data-mail-inbox] * { box-sizing: border-box; }
+main[data-mail-inbox] [hidden] { display: none !important; }
+[data-mail-addresses], [data-mail-list], [data-mail-read] {
+  min-width: 0; min-height: 0; overflow-y: auto; border-radius: 18px; border: 1px solid var(--ib-line); background: var(--ib-card); padding: 14px;
+}
+[data-mail-read] { padding: 18px 20px; }
+.ib-h { margin: 0 0 10px; font-size: 12px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--ib-muted); }
+.ib-quiet { margin: 18px 4px; color: var(--ib-muted); }
+.ib-pick { text-align: center; margin-top: 30vh; }
+.ib-problem { margin: 18px 4px; color: var(--danger-text, #f26262); font-weight: 600; }
+.ib-btn {
+  display: inline-flex; align-items: center; justify-content: center; min-height: 40px; padding: 0 16px; border: 0; border-radius: 999px;
+  background: var(--ib-strong); color: var(--on-accent-strong, #fff); font: inherit; font-size: 14px; font-weight: 750; cursor: pointer;
+}
+.ib-btn.is-quiet { background: color-mix(in srgb, var(--ib-text) 8%, transparent); color: var(--ib-text); }
+.ib-btn.is-danger { color: var(--danger-text, #f26262); }
+.ib-btn:disabled { opacity: .6; cursor: default; }
+
+/* The addresses */
+.ib-addrs { list-style: none; margin: 0 0 14px; padding: 0; display: grid; gap: 4px; }
+.ib-addr {
+  width: 100%; display: grid; gap: 2px; text-align: left; padding: 9px 12px; border: 0; border-radius: 12px;
+  background: transparent; color: var(--ib-text); font: inherit; cursor: pointer;
+}
+.ib-addr:hover { background: color-mix(in srgb, var(--ib-text) 6%, transparent); }
+.ib-addr.is-on { background: color-mix(in srgb, var(--ib-accent) 18%, transparent); }
+.ib-addr-name { font-weight: 700; font-size: 14.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ib-addr-sub { font-size: 12px; color: var(--ib-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ib-newmask { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; padding-top: 12px; border-top: 1px solid var(--ib-line); }
+.ib-input { width: 100%; min-width: 0; min-height: 42px; padding: 0 12px; border-radius: 12px; border: 1px solid var(--ib-line); background: var(--ib-input); color: var(--ib-text); font: inherit; }
+.ib-made { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 10px 0 0; }
+.ib-made-addr { font: 600 13px/1.3 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow-wrap: anywhere; user-select: all; }
+
+/* The list */
+.ib-rows { list-style: none; margin: 0; padding: 0; display: grid; }
+.ib-row {
+  width: 100%; display: grid; gap: 3px; text-align: left; padding: 11px 10px; border: 0; border-bottom: 1px solid var(--ib-line);
+  background: transparent; color: var(--ib-text); font: inherit; cursor: pointer;
+}
+.ib-row:hover { background: color-mix(in srgb, var(--ib-text) 5%, transparent); }
+.ib-row.is-open { background: color-mix(in srgb, var(--ib-accent) 14%, transparent); }
+.ib-row-top { display: flex; align-items: baseline; gap: 10px; }
+.ib-row-from { flex: 1; min-width: 0; font-size: 14.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ib-row-when { flex: none; font-size: 12px; color: var(--ib-faint); font-variant-numeric: tabular-nums; }
+.ib-row-subject { font-size: 13.5px; color: var(--ib-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ib-row-to { font-size: 12px; color: var(--ib-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ib-row.is-unread .ib-row-from { font-weight: 800; }
+.ib-row.is-unread .ib-row-from::before { content: ""; display: inline-block; width: 8px; height: 8px; margin-right: 7px; border-radius: 50%; background: var(--ib-accent); vertical-align: 1px; }
+.ib-row.is-unread .ib-row-subject { color: var(--ib-text); }
+.ib-clip { color: var(--ib-faint); }
+.ib-more { margin: 12px auto 4px; display: flex; }
+.ib-empty { display: grid; gap: 10px; justify-items: start; padding: 18px 6px; color: var(--ib-muted); }
+.ib-empty p { margin: 0; }
+.ib-empty-addr { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.ib-empty-addr code { font: 600 13px/1.3 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--ib-text); overflow-wrap: anywhere; }
+
+/* One message */
+.ib-readbar { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+.ib-back { display: none; }
+.ib-msghead { display: grid; gap: 6px; margin-bottom: 14px; }
+.ib-subject { margin: 0; font-size: 1.3rem; line-height: 1.25; letter-spacing: -.01em; text-wrap: balance; overflow-wrap: anywhere; }
+.ib-meta { margin: 0; font-size: 14px; color: var(--ib-muted); overflow-wrap: anywhere; }
+.ib-meta b { color: var(--ib-text); }
+.ib-images {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 0 0 12px; padding: 10px 12px; border-radius: 12px;
+  background: color-mix(in srgb, var(--ib-accent) 10%, var(--ib-input)); color: var(--ib-muted); font-size: 13.5px;
+}
+.ib-frame { display: block; width: 100%; min-height: 160px; border: 0; border-radius: 12px; background: #fff; }
+.ib-text { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 15px; line-height: 1.55; }
+.ib-att { list-style: none; margin: 14px 0 0; padding: 12px 0 0; border-top: 1px solid var(--ib-line); display: grid; gap: 6px; }
+.ib-att-link { font-weight: 650; color: var(--ib-accent); text-underline-offset: 2px; }
+.ib-att-size { color: var(--ib-faint); font-size: 13px; }
+
+/* A phone: the addresses as one row of chips, then the list; a message is its own screen. */
+@media (max-width: 860px) {
+  main[data-mail-inbox] { display: flex; flex-direction: column; gap: 10px; height: auto; min-height: calc(100dvh - var(--ovnav-h, 60px)); padding: 10px 0 16px; }
+  [data-mail-addresses], [data-mail-list], [data-mail-read] { border-radius: 0; border-left: 0; border-right: 0; overflow: visible; }
+  [data-mail-addresses] { padding: 8px 0 10px; }
+  [data-mail-addresses] .ib-h { display: none; }
+  .ib-addrs { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; margin: 0; padding: 0 12px; }
+  .ib-addrs::-webkit-scrollbar { display: none; }
+  .ib-addrs li { flex: none; }
+  .ib-addr { width: auto; max-width: 70vw; min-height: 40px; padding: 8px 14px; border-radius: 999px; background: color-mix(in srgb, var(--ib-text) 7%, transparent); }
+  .ib-addr-sub { display: none; }
+  .ib-newmask { grid-template-columns: minmax(0, 1fr) auto; margin: 10px 12px 0; padding-top: 10px; }
+  .ib-made { margin: 8px 12px 0; }
+  [data-mail-list] { padding: 8px 4px; }
+  [data-mail-read] { display: none; padding: 12px 14px; }
+  main[data-mail-inbox].is-reading [data-mail-read] { display: block; }
+  main[data-mail-inbox].is-reading [data-mail-list], main[data-mail-inbox].is-reading [data-mail-addresses] { display: none; }
+  .ib-back { display: inline-flex; }
+  .ib-pick { display: none; }
+  .ib-row { min-height: 64px; }
+}
