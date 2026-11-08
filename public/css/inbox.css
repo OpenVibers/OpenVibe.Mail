@@ -66,6 +66,8 @@ main[data-mail-inbox] [hidden] { display: none !important; }
 .ib-rule-form { display: grid; gap: 6px; padding: 8px 0; }
 .ib-rule-enabled { display: flex; align-items: center; gap: 6px; font-size: 13px; }
 .ib-journal-entry { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 0; font-size: 13px; }
+.ib-imap-item { display: grid; gap: 4px; padding: 8px 0; border-bottom: 1px solid var(--ib-line); }
+.ib-imap-who { margin: 0; font-size: 13px; font-weight: 650; overflow-wrap: anywhere; }
 .ib-input { width: 100%; min-width: 0; min-height: 42px; padding: 0 12px; border-radius: 12px; border: 1px solid var(--ib-line); background: var(--ib-input); color: var(--ib-text); font: inherit; }
 .ib-made { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 10px 0 0; }
 .ib-made-addr { font: 600 13px/1.3 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow-wrap: anywhere; user-select: all; }

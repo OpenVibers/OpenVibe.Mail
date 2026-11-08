@@ -37,6 +37,15 @@ function domain(name, fallback) {
     return v;
 }
 
+/** A 32-byte key, base64 or hex, kept as the environment gave it. Never printed and never part of an answer. */
+function secretKey(name) {
+    const raw = String(env[name] || '').trim();
+    if (!raw) return null;
+    const bytes = /^[0-9a-f]{64}$/i.test(raw) ? Buffer.from(raw, 'hex') : Buffer.from(raw, 'base64');
+    if (bytes.length !== 32) throw new Error(`${name} must be 32 bytes, base64 or hex (AES-256-GCM)`);
+    return raw;
+}
+
 function load(overrides = null) {
     if (overrides) env = { ...process.env, ...overrides };
     const nodeEnv = env.NODE_ENV || 'development';
@@ -167,6 +176,27 @@ function load(overrides = null) {
             burnersPerIpHour: int('MAIL_BURNERS_PER_IP_HOUR', 10),
             anonBurnerTtlMinutes: int('MAIL_ANON_BURNER_TTL_MINUTES', 10),
             apiPerMinute: int('MAIL_API_RATE_LIMIT_PER_MIN', 240),
+        },
+
+        // The one key that seals an IMAP password. Read by reference; no log line and no answer carries it. Without
+        // it the feature is off (connecting a mailbox answers "not configured"), so an existing deployment boots
+        // unchanged until the owner sets MAIL_SECRETS_KEY.
+        secrets: {
+            key: secretKey('MAIL_SECRETS_KEY'),
+        },
+
+        // Pulling another provider's mailbox into Inbox AI over IMAP. The remote mailbox is read only; `batch` is
+        // how many connections one run looks at, `maxMessages` how many new messages one connection reads per run,
+        // and `maxBytes` the largest text body handed to the analyzer. `tickMs` only wakes the job: each connection
+        // is due on its own next_sync_at, every `intervalMs`.
+        imap: {
+            intervalMs: int('MAIL_IMAP_INTERVAL_MS', 300_000),
+            tickMs: int('MAIL_IMAP_TICK_MS', 60_000),
+            batch: int('MAIL_IMAP_BATCH', 20),
+            maxMessages: int('MAIL_IMAP_MAX_MESSAGES', 50),
+            maxBytes: int('MAIL_IMAP_MAX_BYTES', 200_000),
+            maxPerOwner: int('MAIL_IMAP_MAX_MAILBOXES', 5),
+            leaseMs: 120_000,
         },
 
         jobs: {
