@@ -130,6 +130,7 @@ function load(overrides = null) {
         // it off Mail sends only to its own domains over loopback, and a reply to anyone else never opens a socket.
         outbound: {
             enabled: /^(1|true|on|yes)$/i.test(String(env.MAIL_OUTBOUND || '').trim()),
+            encryptionKey: env.MAIL_PROVIDER_KEK || '',
         },
 
         // The outbound relay, read only when outbound is switched on. Until it exists, a reply to an address outside

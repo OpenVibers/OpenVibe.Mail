@@ -35,6 +35,7 @@ const burners = require('../domain/burners');
 const agentInboxes = require('../domain/agent-inboxes');
 const messages = require('../domain/messages');
 const answering = require('../domain/agent-answering');
+const outboundProviders = require('../domain/outbound-providers');
 
 /** Whether this inbox answers mail (track HO6): off unless the person turned it on. */
 const agentInboxesAnswering = (db, owner, inbox) => answering.getAnswering({ db, owner, inbox });
@@ -61,6 +62,33 @@ function createApi({ db, config, stalwart, events, principal, log = console, smt
     function fail(req, res, status, code, detail) {
         return http.sendProblem(res, status, code, { detail, ctx: req.ov });
     }
+
+    // Provider keys and spend limits belong to the Network owner. Hide this surface from every other rank and from
+    // app tokens; a provider credential is only accepted over the service's encrypted-at-rest vault.
+    const ownerOnly = (req, res, next) => {
+        if (!req.principal || req.principal.kind !== 'user' || req.principal.role !== 'owner') {
+            return fail(req, res, 404, 'route.not_found', 'No such API route.');
+        }
+        return next();
+    };
+    router.get('/api/v1/admin/mail/providers', ownerOnly, wrap(async (_req, res) => {
+        const rows = await outboundProviders.list(db);
+        return res.json({ outbound_enabled: Boolean(config.outbound.enabled), providers: rows.map(outboundProviders.publicProvider) });
+    }));
+    router.put('/api/v1/admin/mail/providers/:id', ownerOnly, wrap(async (req, res) => {
+        const input = { ...(req.body || {}), id: req.params.id };
+        try {
+            await outboundProviders.save({ db, config, input });
+            const row = (await outboundProviders.list(db)).find((item) => item.id === req.params.id);
+            return res.json({ provider: outboundProviders.publicProvider(row) });
+        } catch (err) {
+            return fail(req, res, 422, 'mail.provider.invalid', err.message);
+        }
+    }));
+    router.delete('/api/v1/admin/mail/providers/:id', ownerOnly, wrap(async (req, res) => {
+        await outboundProviders.remove(db, req.params.id);
+        return res.status(204).end();
+    }));
 
     // ---- the person's front door ---------------------------------------------------------------
 

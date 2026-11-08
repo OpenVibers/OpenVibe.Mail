@@ -147,6 +147,18 @@ function inboxPage(config) {
     });
 }
 
+function providerAdminPage(config) {
+    const base = String(config.baseUrl || 'https://openvibe.email').replace(/\/+$/, '');
+    const nav = { service: SERVICE, apiBase: NETWORK_URL, links: [{ label: 'Home', href: '/' }, { label: 'Inbox', href: '/inbox' }, { label: 'Mail providers', href: '/admin/mail/providers', active: true }], history: { type: 'page', title: 'Mail providers' }, silentLogin: `${base}/auth/login?silent=1&next={url}`, sessionUrl: '/auth/me', loginUrl: '/auth/login?next={path}', logoutUrl: '/auth/logout?next={path}' };
+    return shell.page({
+        name: SITE_NAME, lang: 'en', title: `Mail providers · ${SITE_NAME}`, siteName: SITE_NAME,
+        description: 'Owner controls for outbound mail providers and monthly budgets.', canonical: `${base}/admin/mail/providers`,
+        robots: 'noindex, nofollow', home: '/', navLinks: nav.links, navbar: nav,
+        head: `<meta name="referrer" content="no-referrer"><link rel="stylesheet" href="${ovServe.url('kit.css')}"><link rel="stylesheet" href="${asset('css/mail.css')}"><script src="${asset('js/mail-providers.js')}" defer></script>`,
+        body: `<div id="navbar-mount"></div><main id="main" data-mail-provider-admin><h1>Outbound mail providers</h1><p>External delivery stays closed unless MAIL_OUTBOUND is enabled by the service operator. Every paid provider needs a monthly cap.</p><p data-status role="status">Loading provider settings…</p><section aria-labelledby="configured-heading"><h2 id="configured-heading">Configured providers</h2><div data-provider-list></div></section><section aria-labelledby="add-heading"><h2 id="add-heading">Add or update SMTP provider</h2><form data-provider-form><label>Name <input name="name" required maxlength="100"></label><label>SMTP host <input name="host" required maxlength="253"></label><label>Port <input name="port" type="number" min="1" max="65535" value="587" required></label><label>Username <input name="username" maxlength="200"></label><label>Password <input name="password" type="password" autocomplete="new-password"></label><label>Free messages each month <input name="free_monthly" type="number" min="0" value="0"></label><label>Price per 1,000 after free allowance (USD) <input name="price_per_thousand" type="number" min="0" step="0.000001" value="0"></label><label>Monthly budget cap (USD) <input name="monthly_budget" type="number" min="0" step="0.01" value="0" required></label><label>Priority <input name="priority" type="number" value="100"></label><label><input name="secure" type="checkbox"> TLS from connection</label><label><input name="starttls" type="checkbox" checked> Use STARTTLS when offered</label><label><input name="enabled" type="checkbox"> Enable provider</label><button type="submit">Save provider</button></form></section><p data-error role="alert" hidden></p></main><script>window.__OV_PAGE = ${JSON.stringify({ navbar: nav }).replace(/</g, '\\u003c')};</script>`,
+    });
+}
+
 /** Mount the page, its files and Shared's. Before the API's 404 handler. */
 function mountPages(app, { config }) {
     app.use('/shared', ovServe.handler());
@@ -167,6 +179,12 @@ function mountPages(app, { config }) {
         res.set('Cache-Control', 'private, no-store');
         res.type('html').send(inbox);
     });
+    app.get('/admin/mail/providers', (req, res) => {
+        if (!req.user || req.user.role !== 'owner') return res.status(404).type('text/plain').send('Not found');
+        res.set('Content-Security-Policy', INBOX_CSP);
+        res.set('Cache-Control', 'private, no-store');
+        res.type('html').send(providerAdminPage(config));
+    });
     let html = null;
     app.get('/', (req, res) => {
         html = html || homePage(config);
@@ -176,4 +194,4 @@ function mountPages(app, { config }) {
     });
 }
 
-module.exports = { mountPages, homePage, inboxPage, siteIdentity, CSP, INBOX_CSP, asset };
+module.exports = { mountPages, homePage, inboxPage, providerAdminPage, siteIdentity, CSP, INBOX_CSP, asset };

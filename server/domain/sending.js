@@ -19,6 +19,7 @@
  */
 const { sql } = require('openvibe-sdk/db');
 const reply = require('./agent-reply');
+const providers = require('./outbound-providers');
 
 /** The words a person reads when a reply cannot go outside OpenVibe yet. */
 const OUTBOUND_CLOSED = 'OpenVibe Mail cannot send outside OpenVibe yet: the reply waits here.';
@@ -38,6 +39,7 @@ function routeFor(recipient, config) {
     const outbound = config.outbound;
     if (!outbound || !outbound.enabled) return null;
     const relay = config.relay;
+    if ((!relay || !relay.host) && config.outbound.providerRouting !== false) return { kind: 'relay', providerManaged: true, timeoutMs: reply.TIMEOUT_MS };
     if (!relay || !relay.host) return null;
     return {
         kind: 'relay', host: relay.host, port: relay.port, secure: relay.secure,
@@ -68,7 +70,12 @@ async function sendReply({ db, config, inbox, owner, to, body, subject = null, i
     const rfcMessageId = messageId || reply.newMessageId(domain);
     const built = reply.buildReply({ from, to: recipient, subject, body, messageId: rfcMessageId, inReplyTo, references, at: now(), agentName });
 
-    const route = routeFor(recipient, config);
+    let route = routeFor(recipient, config);
+    if (route && route.providerManaged) {
+        const configured = await providers.list(db);
+        route = await providers.choose({ db, config, now: new Date(now()) });
+        if (!route && !configured.length && config.relay && config.relay.host) route = routeFor(recipient, { ...config, outbound: { ...config.outbound, providerRouting: false } });
+    }
     let outcome;
     if (!route) {
         outcome = { ok: false, code: 0, reason: OUTBOUND_CLOSED };

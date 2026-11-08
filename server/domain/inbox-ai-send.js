@@ -3,6 +3,7 @@
 const { sql } = require('openvibe-sdk/db');
 const sending = require('./sending');
 const reply = require('./agent-reply');
+const providers = require('./outbound-providers');
 
 function senderAddress(from) {
     const value = Array.isArray(from) ? String(from[0] || '') : String(from || '');
@@ -26,7 +27,12 @@ async function sendInboxDraft({ db, config, stalwart, smtp, owner, threadId, bod
     if (!String(text || '').trim() || String(text).length > 10000 || String(title || '').length > 2000 || /[\r\n\u0000]/.test(String(title || ''))) {
         return { status: 422, code: 'mail.ai_draft.invalid' };
     }
-    const route = sending.routeFor(to, config);
+    let route = sending.routeFor(to, config);
+    if (route && route.providerManaged) {
+        const configured = await providers.list(db);
+        route = await providers.choose({ db, config, now: new Date(now()) });
+        if (!route && !configured.length && config.relay && config.relay.host) route = sending.routeFor(to, { ...config, outbound: { ...config.outbound, providerRouting: false } });
+    }
     if (!route) return { status: 409, code: 'mail.outbound_closed', detail: sending.OUTBOUND_CLOSED };
     const claimed = await db.maybe(sql`UPDATE mail_inbox_ai_threads SET draft_state = 'sending',
         draft_body = ${String(text)}, draft_subject = ${String(title || '')}, updated_at = now()
