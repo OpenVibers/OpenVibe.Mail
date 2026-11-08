@@ -56,6 +56,24 @@ async function verifySes(secret, payload, fetchImpl, expectedTopicArn) {
     return crypto.verify(algorithm, Buffer.from(snsCanonical(payload)), cert, signature);
 }
 
+/** A verified SNS SubscriptionConfirmation is confirmed by fetching its SubscribeURL, only when that URL is Amazon's SNS
+ *  endpoint confirming this very topic (https://docs.aws.amazon.com/sns/latest/dg/SendMessageToHttp.confirm.html). */
+function snsConfirmUrl(payload) {
+    if (!payload || payload.Type !== 'SubscriptionConfirmation') return null;
+    let url;
+    try { url = new URL(String(payload.SubscribeURL || '')); } catch { return null; }
+    if (url.protocol !== 'https:' || !/^sns\.[a-z0-9-]+\.amazonaws\.com$/i.test(url.hostname) || url.port) return null;
+    if (url.searchParams.get('Action') !== 'ConfirmSubscription' || url.searchParams.get('TopicArn') !== payload.TopicArn) return null;
+    return url.toString();
+}
+
+async function confirmSnsSubscription(payload, fetchImpl = globalThis.fetch) {
+    const url = snsConfirmUrl(payload);
+    if (!url) return false;
+    const response = await fetchImpl(url, { redirect: 'error', signal: AbortSignal.timeout(5000) });
+    return Boolean(response && response.ok);
+}
+
 async function verify({ adapter, secret, payload, rawBody, headers = {}, fetchImpl = globalThis.fetch, now = Date.now(), expectedTopicArn }) {
     const raw = Buffer.isBuffer(rawBody) ? rawBody : Buffer.from(String(rawBody || ''));
     if (adapter === 'ses') return verifySes(secret, payload, fetchImpl, expectedTopicArn);
@@ -121,9 +139,14 @@ async function handle({ db, config, providerId, payload, rawBody, headers, fetch
     }
     const valid = await verify({ adapter: row.adapter, secret, payload, rawBody, headers, fetchImpl, now: now ? now.getTime() : Date.now(), expectedTopicArn: row.settings && row.settings.sns_topic_arn });
     if (!valid) return { status: 401, body: { error: 'invalid_signature' } };
+    if (row.adapter === 'ses' && payload.Type === 'SubscriptionConfirmation') {
+        const confirmed = await confirmSnsSubscription(payload, fetchImpl).catch(() => false);
+        return { status: confirmed ? 200 : 502, body: { confirmed } };
+    }
+    if (row.adapter === 'ses' && payload.Type === 'UnsubscribeConfirmation') return { status: 200, body: { accepted: true, ignored: true } };
     const events = Array.isArray(parsed) ? parsed : [parsed];
     const results = await Promise.all(events.map((event) => ingest({ db, provider: row, payload: event, now })));
     return { status: 200, body: { accepted: true, events: results.length, duplicates: results.filter((result) => result.duplicate).length } };
 }
 
-module.exports = { verify, verifyResend, verifySes, snsCanonical, ingest, handle, verifyHmac };
+module.exports = { verify, verifyResend, verifySes, snsCanonical, snsConfirmUrl, confirmSnsSubscription, ingest, handle, verifyHmac };

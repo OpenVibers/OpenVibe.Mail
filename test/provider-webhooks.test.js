@@ -1,4 +1,5 @@
 'use strict';
+const fs = require('fs');
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -79,4 +80,20 @@ test('owner domain records are saved with return-path and generated SPF inputs',
     assert.equal(data.lookup_count_uncertain, false);
     assert.equal(data.records[0].return_path, 'bounce.example.com');
     assert.equal(data.records[0].dkim_records[0].name, 'selector._domainkey.example.com');
+});
+
+test('SNS posts text/plain, and a subscription is confirmed only at Amazon SNS for the same topic', async () => {
+    const app = fs.readFileSync(require('path').join(__dirname, '..', 'server', 'app.js'), 'utf8');
+    assert.match(app, /provider-webhooks', express\.json\(\{ type: \['application\/json', 'text\/plain'\]/);
+    const topic = 'arn:aws:sns:us-east-1:123456789012:mail';
+    const good = { Type: 'SubscriptionConfirmation', TopicArn: topic, SubscribeURL: `https://sns.us-east-1.amazonaws.com/?Action=ConfirmSubscription&TopicArn=${encodeURIComponent(topic)}&Token=abc` };
+    assert.ok(webhooks.snsConfirmUrl(good));
+    assert.equal(webhooks.snsConfirmUrl({ ...good, SubscribeURL: 'https://sns.us-east-1.amazonaws.com.evil.example/?Action=ConfirmSubscription' }), null);
+    assert.equal(webhooks.snsConfirmUrl({ ...good, SubscribeURL: 'http://sns.us-east-1.amazonaws.com/?Action=ConfirmSubscription&TopicArn=' + encodeURIComponent(topic) }), null);
+    assert.equal(webhooks.snsConfirmUrl({ ...good, SubscribeURL: good.SubscribeURL.replace('mail', 'other') }), null);
+    assert.equal(webhooks.snsConfirmUrl({ ...good, Type: 'Notification' }), null);
+    const asked = [];
+    assert.equal(await webhooks.confirmSnsSubscription(good, async (url, opts) => { asked.push([url, opts.redirect]); return { ok: true }; }), true);
+    assert.deepEqual(asked.map(([, r]) => r), ['error']);
+    assert.equal(await webhooks.confirmSnsSubscription({ ...good, SubscribeURL: 'https://127.0.0.1/?Action=ConfirmSubscription' }, async () => { throw new Error('must not fetch'); }), false);
 });
