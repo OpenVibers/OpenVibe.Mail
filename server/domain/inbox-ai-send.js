@@ -18,9 +18,17 @@ async function sendInboxDraft({ db, config, stalwart, smtp, owner, threadId, bod
     if (!draft || draft.draft_state !== 'draft') return { status: 404, code: 'mail.ai_draft.not_found' };
     const mailbox = await db.maybe(sql`SELECT address FROM mail_mailboxes WHERE owner_subject = ${owner}`);
     if (!mailbox) return { status: 404, code: 'mail.not_found' };
-    const original = await stalwart.readMessage({ mailboxAddress: mailbox.address, id: draft.message_id });
-    if (!original || original.spam) return { status: 404, code: 'mail.not_found' };
-    const to = senderAddress(original.from);
+    // An IMAP-pulled thread has no message in Stalwart: the sender the pull stored is what the draft answers.
+    const pulled = String(draft.message_id || '').startsWith('imap:');
+    let original = null;
+    let to;
+    if (pulled) {
+        to = senderAddress(draft.sender);
+    } else {
+        original = await stalwart.readMessage({ mailboxAddress: mailbox.address, id: draft.message_id });
+        if (!original || original.spam) return { status: 404, code: 'mail.not_found' };
+        to = senderAddress(original.from);
+    }
     if (!to || to !== senderAddress(draft.draft_to)) return { status: 422, code: 'mail.ai_draft.recipient_changed' };
     const text = typeof body === 'string' ? body : draft.draft_body;
     const title = typeof subject === 'string' ? subject : draft.draft_subject;
@@ -36,7 +44,7 @@ async function sendInboxDraft({ db, config, stalwart, smtp, owner, threadId, bod
         WHERE owner_subject = ${owner} AND thread_id = ${threadId} AND draft_state = 'draft' RETURNING thread_id`);
     if (!claimed) return { status: 409, code: 'mail.ai_draft.already_sending' };
     try {
-        const headers = original.threadHeaders || {};
+        const headers = (original && original.threadHeaders) || {};
         const messageId = reply.newMessageId(config.addresses.base);
         const message = reply.buildReply({ from: mailbox.address, to, subject: title, body: text,
             messageId, inReplyTo: headers.messageId || null,

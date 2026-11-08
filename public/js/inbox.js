@@ -20,7 +20,7 @@
   var listEl = root.querySelector('[data-mail-list]');
   var readEl = root.querySelector('[data-mail-read]');
   var addresses = Array.isArray(data.addresses) ? data.addresses : [];
-  var current = 'all', cursor = null, rows = [], openId = null, loading = false, aiEnabled = false, triageThreads = [], aiRules = [], aiJournal = [];
+  var current = 'all', cursor = null, rows = [], openId = null, loading = false, aiEnabled = false, triageThreads = [], aiRules = [], aiJournal = [], imapMailboxes = [];
   var KIND = { mailbox: 'Your mailbox', mask: 'Mask', agent: 'Agent inbox', burner: 'Burner' };
 
   function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
@@ -72,6 +72,7 @@
     });
     side.appendChild(ul);
     var aiBox = el('section', 'ib-ai-settings');
+    aiBox.id = 'inbox-ai';   // openvibe.my's Receipts card links here to turn Inbox AI on
     aiBox.appendChild(el('h2', 'ib-h', 'Inbox AI'));
     var aiLabel = el('label', 'ib-ai-label');
     var aiToggle = el('input');
@@ -88,6 +89,51 @@
     var aiCopy = el('p', 'ib-quiet', aiEnabled ? 'On · uses your OpenVibe.AI allowance. Drafts wait for your click.' : 'Off · your mail is not sent for AI triage.');
     aiBox.appendChild(aiCopy);
     side.appendChild(aiBox);
+    // Connected mailboxes: Inbox AI reading another provider over IMAP. Read only, app password, and Disconnect is
+    // the way back out; the summaries it pulled go only when the person asks.
+    var imapBox = el('section', 'ib-ai-rules ib-imap');
+    imapBox.appendChild(el('h2', 'ib-h', 'Connected mailboxes'));
+    imapBox.appendChild(el('p', 'ib-quiet', 'Read another mailbox over IMAP. Mail only reads it; nothing there is moved or deleted. Use an app password, not your usual password.'));
+    imapMailboxes.forEach(function (connection) {
+      var item = el('div', 'ib-imap-item');
+      item.appendChild(el('p', 'ib-imap-who', connection.username + ' · ' + connection.host));
+      item.appendChild(el('p', 'ib-quiet', connection.last_sync_at ? 'Last checked ' + when(connection.last_sync_at) : 'Not checked yet.'));
+      if (connection.last_error) item.appendChild(el('p', 'ib-problem', connection.last_error));
+      var also = el('input'); also.type = 'checkbox';
+      also.setAttribute('aria-label', 'Also delete the summaries pulled from this mailbox');
+      var alsoLabel = el('label', 'ib-rule-enabled'); alsoLabel.appendChild(also);
+      alsoLabel.appendChild(document.createTextNode(' Also delete its AI summaries'));
+      var off = el('button', 'ib-btn is-quiet is-danger', 'Disconnect'); off.type = 'button';
+      off.addEventListener('click', function () {
+        if (!window.confirm(also.checked ? 'Disconnect ' + connection.username + ' and delete the summaries pulled from it?' : 'Disconnect ' + connection.username + '?')) return;
+        off.disabled = true;
+        api('/api/v1/me/mail/imap-mailboxes/' + encodeURIComponent(connection.id) + '?delete_triage=' + (also.checked ? '1' : '0'), { method: 'DELETE' })
+          .then(function () { return loadAiControls(); }).then(paintSide)
+          .catch(function (err) { off.disabled = false; item.appendChild(el('p', 'ib-problem', 'Could not disconnect: ' + err.message)); });
+      });
+      item.appendChild(alsoLabel); item.appendChild(off);
+      imapBox.appendChild(item);
+    });
+    if (aiEnabled) {
+      var imapForm = el('form', 'ib-rule-form');
+      var imapHost = el('input', 'ib-input'); imapHost.placeholder = 'imap.gmail.com'; imapHost.setAttribute('aria-label', 'IMAP host');
+      var imapUser = el('input', 'ib-input'); imapUser.placeholder = 'you@gmail.com'; imapUser.setAttribute('aria-label', 'IMAP username');
+      var imapPass = el('input', 'ib-input'); imapPass.type = 'password'; imapPass.autocomplete = 'new-password'; imapPass.placeholder = 'App password'; imapPass.setAttribute('aria-label', 'App password');
+      var imapGo = el('button', 'ib-btn is-quiet', 'Connect'); imapGo.type = 'submit';
+      var imapNote = el('p', 'ib-quiet');
+      imapForm.appendChild(imapHost); imapForm.appendChild(imapUser); imapForm.appendChild(imapPass); imapForm.appendChild(imapGo); imapForm.appendChild(imapNote);
+      imapForm.addEventListener('submit', function (event) {
+        event.preventDefault();
+        imapGo.disabled = true; imapNote.textContent = 'Checking the mailbox…';
+        api('/api/v1/me/mail/imap-mailboxes', { method: 'POST', body: { host: imapHost.value.trim(), username: imapUser.value.trim(), password: imapPass.value } })
+          .then(function () { imapPass.value = ''; return loadAiControls(); }).then(paintSide)
+          .catch(function (err) { imapGo.disabled = false; imapNote.textContent = err.message; });
+      });
+      imapBox.appendChild(imapForm);
+    } else if (!imapMailboxes.length) {
+      imapBox.appendChild(el('p', 'ib-quiet', 'Turn on Inbox AI to connect a mailbox.'));
+    }
+    side.appendChild(imapBox);
     var rulesBox = el('section', 'ib-ai-rules');
     rulesBox.appendChild(el('h2', 'ib-h', 'Rules'));
     function ruleForm(rule) {
@@ -380,12 +426,19 @@
   // The addresses come from the API when the shell does not carry them.
   function begin() {
     paintSide();
-    loadAiControls().then(paintSide).catch(function () {});
+    loadAiControls().then(function () {
+      paintSide();
+      // A link from openvibe.my's Receipts card to #inbox-ai lands on the switch, which only exists after this paint.
+      if (location.hash === '#inbox-ai') {
+        var ai = document.getElementById('inbox-ai');
+        if (ai && ai.scrollIntoView) ai.scrollIntoView({ block: 'center' });
+      }
+    }).catch(function () {});
     loadList();
   }
   function loadAiControls() {
-    return Promise.all([api('/api/v1/me/mail/ai-settings'), api('/api/v1/me/mail/ai-rules'), api('/api/v1/me/mail/ai-journal')])
-      .then(function (results) { aiEnabled = !!results[0].enabled; aiRules = results[1].rules || []; aiJournal = results[2].entries || []; });
+    return Promise.all([api('/api/v1/me/mail/ai-settings'), api('/api/v1/me/mail/ai-rules'), api('/api/v1/me/mail/ai-journal'), api('/api/v1/me/mail/imap-mailboxes')])
+      .then(function (results) { aiEnabled = !!results[0].enabled; aiRules = results[1].rules || []; aiJournal = results[2].entries || []; imapMailboxes = results[3].mailboxes || []; });
   }
   if (addresses.length) begin();
   else api('/api/v1/me/mail/addresses').then(function (b) { addresses = b.addresses || []; begin(); }).catch(function () { begin(); });

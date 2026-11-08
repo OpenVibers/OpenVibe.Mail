@@ -47,6 +47,10 @@ test('the page\'s files are served by content hash, and Shared\'s from /shared',
     const stale = await s.get('/js/mail.js?v=0000000000');
     assert.strictEqual(stale.status, 200);
     assert.doesNotMatch(stale.headers.get('cache-control') || '', /immutable/, 'a wrong hash is not cached for a year');
+    const inboxJs = await s.get(asset('js/inbox.js'));
+    assert.strictEqual(inboxJs.status, 200);
+    assert.match(inboxJs.text, /Connected mailboxes/, 'Inbox AI shows the connected mailboxes');
+    assert.match(inboxJs.text, /imap-mailboxes/);
     const navbar = await s.get('/shared/navbar.js');
     assert.strictEqual(navbar.status, 200);
     const missing = await s.get('/js/nope.js');

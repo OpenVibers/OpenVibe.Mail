@@ -118,7 +118,7 @@ async function createApp(opts = {}) {
     }));
 
     app.use('/api/v1', principal.middleware);
-    app.use(createApi({ db: store.db, config, stalwart, events, principal, log, smtp: opts.smtp || null, fetchImpl }));
+    app.use(createApi({ db: store.db, config, stalwart, events, principal, log, smtp: opts.smtp || null, fetchImpl, imap: opts.imap || null }));
 
     // The agent's own system (track HO6): one letter in full text and the reply to it, loopback only under a
     // first-party service token; and the person's own answering switch and block list.

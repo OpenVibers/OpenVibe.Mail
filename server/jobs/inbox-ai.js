@@ -4,8 +4,7 @@ const { sql } = require('openvibe-sdk/db');
 const { mailboxAddressFor } = require('../domain/mailboxes');
 const { createInboxAnalyzer } = require('../ai/inbox');
 const { matchedRule } = require('../domain/inbox-ai-rules');
-const { randomUUID } = require('node:crypto');
-const { senderAddress } = require('../domain/inbox-ai-send');
+const { storeTriage } = require('../domain/inbox-ai-store');
 
 const LEASE_KEY = 'inbox_ai_lease';
 // Under the 60 s tick, so a lease taken at one tick has expired by the next.
@@ -48,24 +47,7 @@ async function runInboxAi({ db, stalwart, analyze, log = console, now = () => Da
                 const triage = await analyze({ owner, message: { ...message, text: full.text || '' } });
                 if (!triage) continue;
                 const rule = await matchedRule(db, owner, message);
-                const previousCategory = triage.category;
-                if (rule) triage.category = rule.category;
-                const sender = (message.from || [])[0];
-                const replyTo = senderAddress(sender);
-                const draft = triage.category === 'needs_reply' && replyTo
-                    ? { to: replyTo, subject: /^re:/i.test(message.subject || '') ? message.subject : `Re: ${message.subject || ''}`, body: triage.draft }
-                    : null;
-                await db.tx(async (t) => {
-                    await t.exec(sql`
-                    INSERT INTO mail_inbox_ai_threads
-                        (owner_subject, thread_id, message_id, sender, subject, category, summary, draft_to, draft_subject, draft_body, received_at)
-                    VALUES (${owner}, ${threadId}, ${message.id}, ${sender}, ${message.subject || null}, ${triage.category}, ${triage.summary},
-                        ${draft && draft.to}, ${draft && draft.subject}, ${draft && draft.body}, ${message.receivedAt})
-                    ON CONFLICT (owner_subject, thread_id) DO NOTHING`);
-                    if (rule) await t.exec(sql`INSERT INTO mail_inbox_ai_journal
-                        (id, owner_subject, rule_id, rule_name, thread_id, previous_category, action_category)
-                        VALUES (${`act_${randomUUID()}`}, ${owner}, ${rule.id}, ${rule.name}, ${threadId}, ${previousCategory}, ${rule.category})`);
-                });
+                await storeTriage({ db, owner, threadId, message, triage, rule });
                 stats.triaged++;
             }
         } catch (err) {

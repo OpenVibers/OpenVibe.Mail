@@ -87,8 +87,18 @@ test('rules are owner-scoped, journal category changes, and undo restores the pr
     const report = await runInboxAi({ db: s.db, stalwart: s.mail, analyze: async () => ({ category: 'to_read', summary: 'Order receipt' }) });
     assert.strictEqual(report.triaged, 1);
     const receipts = await s.get('/api/v1/me/mail/receipts', { as: alice });
+    assert.strictEqual(receipts.body.enabled, true, 'the card can tell Inbox AI is on');
     assert.strictEqual(receipts.body.receipts.length, 1);
     assert.strictEqual(receipts.body.receipts[0].merchant, 'seller@openvibe.email');
+    assert.ok(receipts.body.receipts[0].message_id, 'the card has the message to link to');
+    assert.strictEqual((await s.get('/api/v1/me/mail/receipts', { as: bob })).body.receipts.length, 0, 'another person sees none');
+    // Turning Inbox AI off hides the summaries kept from when it was on: the card asks to turn it back on rather
+    // than showing receipts the person no longer consented to have triaged.
+    await s.put('/api/v1/me/mail/ai-settings', { as: alice, json: { enabled: false } });
+    const off = await s.get('/api/v1/me/mail/receipts', { as: alice });
+    assert.strictEqual(off.body.enabled, false);
+    assert.deepStrictEqual(off.body.receipts, []);
+    await s.put('/api/v1/me/mail/ai-settings', { as: alice, json: { enabled: true } });
     const journal = await s.get('/api/v1/me/mail/ai-journal', { as: alice });
     assert.strictEqual(journal.body.entries.length, 1);
     assert.strictEqual(journal.body.entries[0].previous_category, 'to_read');

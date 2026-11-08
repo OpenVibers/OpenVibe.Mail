@@ -2,8 +2,9 @@
 
 `openvibe.email` — masks that protect you, burners that self-destruct, and an inbox for every agent.
 
-Mail receives mail for OpenVibe mailboxes and includes opt-in Inbox AI. Replies stay drafts until the person edits and
-clicks Send; external delivery remains closed unless the configured outbound relay is enabled. See
+Mail receives mail for OpenVibe mailboxes and includes opt-in Inbox AI, which can also pull another provider's
+mailbox over IMAP (TLS only, read only, app password sealed with `MAIL_SECRETS_KEY`). Replies stay drafts until the
+person edits and clicks Send; external delivery remains closed unless the configured outbound relay is enabled. See
 [Inbox AI](docs/INBOX-AI.md) for the consent, rules, journal, undo and receipts APIs.
 
 ## M1.5: read your mail (2026-11-07)

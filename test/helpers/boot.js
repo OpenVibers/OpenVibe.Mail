@@ -44,6 +44,8 @@ async function boot(opts = {}) {
         MAIL_MAX_LIVE_BURNERS: '5',
         MAIL_BURNERS_PER_IP_HOUR: '10',
         MAIL_ANON_BURNER_TTL_MINUTES: '10',
+        // A fixed 32-byte key for the IMAP seal. A test that needs the feature off passes MAIL_SECRETS_KEY: ''.
+        MAIL_SECRETS_KEY: Buffer.alloc(32, 7).toString('base64'),
         ...(opts.env || {}),
     });
 
@@ -51,7 +53,7 @@ async function boot(opts = {}) {
     const store = createStore((await testDb()).db, { now: opts.now });
 
     const { createApp } = require('../../server/app');
-    const built = await createApp({ config, store, stalwart: mail, log, smtp: opts.smtp || null });
+    const built = await createApp({ config, store, stalwart: mail, log, smtp: opts.smtp || null, imap: opts.imap || null });
     await built.ctx.keys.ensure();
 
     const server = await new Promise((resolve) => {
