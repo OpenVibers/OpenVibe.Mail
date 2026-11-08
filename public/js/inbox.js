@@ -72,6 +72,7 @@
     });
     side.appendChild(ul);
     var aiBox = el('section', 'ib-ai-settings');
+    aiBox.id = 'inbox-ai';   // openvibe.my's Receipts card links here to turn Inbox AI on
     aiBox.appendChild(el('h2', 'ib-h', 'Inbox AI'));
     var aiLabel = el('label', 'ib-ai-label');
     var aiToggle = el('input');
@@ -380,7 +381,14 @@
   // The addresses come from the API when the shell does not carry them.
   function begin() {
     paintSide();
-    loadAiControls().then(paintSide).catch(function () {});
+    loadAiControls().then(function () {
+      paintSide();
+      // A link from openvibe.my's Receipts card to #inbox-ai lands on the switch, which only exists after this paint.
+      if (location.hash === '#inbox-ai') {
+        var ai = document.getElementById('inbox-ai');
+        if (ai && ai.scrollIntoView) ai.scrollIntoView({ block: 'center' });
+      }
+    }).catch(function () {});
     loadList();
   }
   function loadAiControls() {

@@ -20,7 +20,8 @@ the send route runs only after the person explicitly clicks Send. Outbound relay
   exact sender address and/or subject substring and assigns a category.
 - `GET /api/v1/me/mail/ai-journal` lists category changes made by rules. `POST
   /api/v1/me/mail/ai-journal/{id}/undo` restores the previous category when the thread has not since changed.
-- `GET /api/v1/me/mail/receipts` is the read-only handoff for openvibe.my: `{ receipts: [{ thread_id, merchant,
-  subject, summary, received_at }] }`. It contains only the person's own receipt-category summaries.
+- `GET /api/v1/me/mail/receipts` is the read-only handoff for openvibe.my: `{ enabled, receipts: [{ thread_id,
+  message_id, merchant, subject, summary, received_at }] }`. `enabled` is the mailbox's Inbox AI opt-in; when it is
+  off or there is no mailbox, `receipts` is empty. It contains only the person's own receipt-category summaries.
 
 These routes require a person token and are private/no-store. Rule journals never contain message bodies.
