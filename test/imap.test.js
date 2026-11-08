@@ -299,3 +299,36 @@ test('without MAIL_SECRETS_KEY there is nothing to seal and the route says so', 
     assert.strictEqual(made.status, 503);
     assert.match(made.body.detail, /not configured/);
 });
+
+test('a UIDVALIDITY reset on a big mailbox resumes at the newest mail, not the oldest', async (t) => {
+    const first = fakeSession({ uidValidity: '7', uidNext: 1, messages: [] , highestUid: 0 });
+    const reset = fakeSession({ uidValidity: '9', uidNext: 50001, messages: [message(1, 'Old'), message(49999, 'Newer'), message(50000, 'Newest')] });
+    const imap = fakeImap({ sessions: [first, reset] });
+    const s = await boot({ imap });
+    t.after(() => s.close());
+    await connect(s, imap);
+    const seen = [];
+    const analyze = async ({ message: input }) => { seen.push(input.uid); return { category: 'other', summary: `S${input.uid}` }; };
+    await runImapPull({ db: s.db, config: s.config, imap, analyze });
+    await makeDue(s.db);
+    await runImapPull({ db: s.db, config: s.config, imap, analyze });
+    assert.deepStrictEqual(seen, [49999, 50000]);
+});
+
+test('only port 993, five mailboxes and ten attempts an hour per person', async (t) => {
+    assert.throws(() => validateInput({ host: 'imap.example.net', port: 22, username: 'u', password: 'p' }), /993 only/);
+    assert.throws(() => validateInput({ host: 'imap.example.net', port: 143, username: 'u', password: 'p' }), /993 only/);
+    const imap = fakeImap({ testError: Object.assign(new Error('nope'), { code: 'EAUTH' }) });
+    const s = await boot({ imap });
+    t.after(() => s.close());
+    const bob = s.network.addUser('bob');
+    await s.post('/api/v1/masks', { as: bob, json: { label: 'shop' } });
+    await s.put('/api/v1/me/mail/ai-settings', { as: bob, json: { enabled: true } });
+    const statuses = [];
+    for (let i = 0; i < 11; i += 1) {
+        const r = await s.post('/api/v1/me/mail/imap-mailboxes', { as: bob, json: { host: 'imap.example.net', username: `u${i}@example.net`, password: 'x' } });
+        statuses.push(r.status);
+    }
+    assert.deepStrictEqual(statuses.slice(0, 10), Array(10).fill(422));
+    assert.strictEqual(statuses[10], 429);
+});

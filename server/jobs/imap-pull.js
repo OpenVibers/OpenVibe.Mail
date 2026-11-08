@@ -48,8 +48,12 @@ async function pullConnection({ db, config, imap, analyze, connection }) {
     try {
         const validity = String(session.uidValidity);
         const stored = connection.uid_validity == null ? null : String(connection.uid_validity);
-        // A changed UIDVALIDITY means the old UID numbers mean nothing: start over and let thread_id dedupe.
-        const afterUid = stored && stored === validity ? Number(connection.last_uid) || 0 : 0;
+        // A changed UIDVALIDITY means the old UID numbers mean nothing. Start again at the newest mail (the server
+        // renumbers from 1, so the last maxMessages UIDs are the latest), never at the oldest: a big mailbox would
+        // otherwise be read from years back, one batch per interval. thread_id carries the validity, so no clash.
+        const afterUid = stored && stored === validity
+            ? Number(connection.last_uid) || 0
+            : Math.max(0, (Number(session.uidNext) || 1) - 1 - config.imap.maxMessages);
         const { messages, highestUid } = await session.fetchNew({ afterUid, limit: config.imap.maxMessages });
         let triaged = 0;
         let consented = true;

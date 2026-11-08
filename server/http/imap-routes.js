@@ -23,6 +23,8 @@ function mountImap(router, { db, config, principal, wrap, fail, ownerOf, imap = 
     const write = principal.requirePerson(principal.CAPABILITIES.write);
     const noStore = (res) => res.set('Cache-Control', 'no-store');
 
+    const MAX_MAILBOXES = 5, MAX_ATTEMPTS = 10, ATTEMPT_WINDOW_MS = 60 * 60_000;
+    const attempts = new Map();
     router.get('/api/v1/me/mail/imap-mailboxes', read, wrap(async (req, res) => {
         const mailboxes = await imapConnections.listConnections({ db, owner: ownerOf(req) });
         return noStore(res).json({ mailboxes });
@@ -30,6 +32,17 @@ function mountImap(router, { db, config, principal, wrap, fail, ownerOf, imap = 
 
     router.post('/api/v1/me/mail/imap-mailboxes', write, wrap(async (req, res) => {
         const owner = ownerOf(req);
+        // Each attempt opens a TLS connection to a host the person chose: a few per hour, and a few mailboxes each.
+        const now = Date.now();
+        const recent = (attempts.get(owner) || []).filter((at) => now - at < ATTEMPT_WINDOW_MS);
+        if (recent.length >= MAX_ATTEMPTS) {
+            return fail(req, res, 429, 'mail.imap.too_many_attempts', 'Too many connection attempts. Try again in an hour.');
+        }
+        recent.push(now); attempts.set(owner, recent);
+        const connected = await imapConnections.listConnections({ db, owner });
+        if (connected.length >= MAX_MAILBOXES) {
+            return fail(req, res, 409, 'mail.imap.too_many', `You can connect up to ${MAX_MAILBOXES} other mailboxes. Disconnect one first.`);
+        }
         let input;
         try {
             input = imapConnections.validateInput(req.body);

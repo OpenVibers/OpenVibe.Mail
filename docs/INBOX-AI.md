@@ -38,13 +38,14 @@ providers expect for IMAP; use an app password:
 
 - `GET /api/v1/me/mail/imap-mailboxes` lists the person's connections with `last_sync_at` and a plain-words
   `last_error`. It never returns a password or the sealed value.
-- `POST /api/v1/me/mail/imap-mailboxes` takes `{ host, port, username, password }`, tests the connection before
-  saving it, and answers 422 with one sentence when the host, certificate, sign-in or TLS fails. A failed test
-  leaves no row. Inbox AI must be on (409 otherwise), and the host must be a public DNS name.
+- `POST /api/v1/me/mail/imap-mailboxes` takes `{ host, username, password }` (`port`, if sent, must be 993), tests the connection
+  before saving it, and answers 422 with one sentence when the host, certificate, sign-in or TLS fails. A failed test
+  leaves no row. Inbox AI must be on (409 otherwise), the host must be a public DNS name, a person connects at most
+  five mailboxes (409), and ten attempts an hour (429).
 - `DELETE /api/v1/me/mail/imap-mailboxes/{id}` deletes the credential. With `?delete_triage=1` it also deletes the
   summaries and drafts pulled through that connection; without it those rows stay.
 
-The connection is TLS only (implicit TLS, port 993 by default; there is no plaintext mode) and the host goes
+The connection is TLS only (implicit TLS on port 993 only; there is no plaintext mode and no other port) and the host goes
 through `openvibe-shared/egress`, so a name that resolves to a private, loopback or link-local address is refused
 before the handshake. The app password is sealed with AES-256-GCM under `MAIL_SECRETS_KEY` before it is stored, with
 the person and connection id as the additional authenticated data. Without that key the feature answers 503 and no

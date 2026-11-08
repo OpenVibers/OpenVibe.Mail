@@ -95,7 +95,7 @@
     imapBox.appendChild(el('p', 'ib-quiet', 'Read another mailbox over IMAP. Mail only reads it; nothing there is moved or deleted. Use an app password, not your usual password.'));
     imapMailboxes.forEach(function (connection) {
       var item = el('div', 'ib-imap-item');
-      item.appendChild(el('p', 'ib-imap-who', connection.username + ' · ' + connection.host + ':' + connection.port));
+      item.appendChild(el('p', 'ib-imap-who', connection.username + ' · ' + connection.host));
       item.appendChild(el('p', 'ib-quiet', connection.last_sync_at ? 'Last checked ' + when(connection.last_sync_at) : 'Not checked yet.'));
       if (connection.last_error) item.appendChild(el('p', 'ib-problem', connection.last_error));
       var also = el('input'); also.type = 'checkbox';
@@ -116,16 +116,15 @@
     if (aiEnabled) {
       var imapForm = el('form', 'ib-rule-form');
       var imapHost = el('input', 'ib-input'); imapHost.placeholder = 'imap.gmail.com'; imapHost.setAttribute('aria-label', 'IMAP host');
-      var imapPort = el('input', 'ib-input'); imapPort.type = 'number'; imapPort.min = '1'; imapPort.max = '65535'; imapPort.value = '993'; imapPort.setAttribute('aria-label', 'IMAP port');
       var imapUser = el('input', 'ib-input'); imapUser.placeholder = 'you@gmail.com'; imapUser.setAttribute('aria-label', 'IMAP username');
       var imapPass = el('input', 'ib-input'); imapPass.type = 'password'; imapPass.autocomplete = 'new-password'; imapPass.placeholder = 'App password'; imapPass.setAttribute('aria-label', 'App password');
       var imapGo = el('button', 'ib-btn is-quiet', 'Connect'); imapGo.type = 'submit';
       var imapNote = el('p', 'ib-quiet');
-      imapForm.appendChild(imapHost); imapForm.appendChild(imapPort); imapForm.appendChild(imapUser); imapForm.appendChild(imapPass); imapForm.appendChild(imapGo); imapForm.appendChild(imapNote);
+      imapForm.appendChild(imapHost); imapForm.appendChild(imapUser); imapForm.appendChild(imapPass); imapForm.appendChild(imapGo); imapForm.appendChild(imapNote);
       imapForm.addEventListener('submit', function (event) {
         event.preventDefault();
         imapGo.disabled = true; imapNote.textContent = 'Checking the mailbox…';
-        api('/api/v1/me/mail/imap-mailboxes', { method: 'POST', body: { host: imapHost.value.trim(), port: Number(imapPort.value), username: imapUser.value.trim(), password: imapPass.value } })
+        api('/api/v1/me/mail/imap-mailboxes', { method: 'POST', body: { host: imapHost.value.trim(), username: imapUser.value.trim(), password: imapPass.value } })
           .then(function () { imapPass.value = ''; return loadAiControls(); }).then(paintSide)
           .catch(function (err) { imapGo.disabled = false; imapNote.textContent = err.message; });
       });

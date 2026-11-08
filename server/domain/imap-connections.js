@@ -50,8 +50,10 @@ function validateInput(body) {
         throw problem('mail.imap.host_invalid', 'Enter the mail server’s host name, for example imap.gmail.com.');
     }
     const port = input.port === undefined || input.port === null || input.port === '' ? DEFAULT_PORT : Number(input.port);
-    if (!Number.isInteger(port) || port < 1 || port > 65535) {
-        throw problem('mail.imap.port_invalid', 'Enter the mail server’s IMAP port, usually 993.');
+    // Implicit TLS on 993 only: every large provider uses it, and a free port choice would let anyone make this
+    // server knock on arbitrary ports of arbitrary hosts.
+    if (port !== DEFAULT_PORT) {
+        throw problem('mail.imap.port_invalid', 'Mail connects over IMAP with TLS on port 993 only.');
     }
     const username = String(input.username || '').trim();
     if (!username || username.length > 320 || /[\u0000-\u001f\u007f]/.test(username)) {
@@ -75,10 +77,10 @@ function plainError(err) {
     }
     if (/ENOTFOUND|EAI_AGAIN|EAI_FAIL/i.test(code)) return 'That host name could not be found.';
     if (/ETIMEDOUT|ESOCKETTIMEDOUT|ECONNREFUSED|EHOSTUNREACH|ENETUNREACH/i.test(code)) {
-        return 'The mail server did not answer on that host and port.';
+        return 'The mail server did not answer. Check the host name.';
     }
     if (code === 'IMAP_SECRET_UNREADABLE' || code === 'IMAP_NO_KEY') return 'The saved app password could not be read. Reconnect the mailbox.';
-    return 'The mailbox could not be read. Check the host, port and app password.';
+    return 'The mailbox could not be read. Check the host and the app password.';
 }
 
 async function countForOwner(db, owner) {
