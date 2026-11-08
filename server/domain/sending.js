@@ -3,16 +3,16 @@
 /**
  * Sending an agent's reply: build it (server/domain/agent-reply.js), then hand it to the mail server.
  *
- * The two paths, and why there are two:
+ * There are two paths, and the second one is CLOSED until the owner says otherwise.
  *
- *   * LOCAL. The recipient is on one of our own domains (openvibe.email, a mask domain, a burner domain). The mail
- *     server already takes mail for these over loopback, so Mail submits it there on port 25 with no relay and no
- *     credentials. That is the path a reply to the person's own addresses, and a reply to another OpenVibe address,
- *     take today.
- *   * RELAY. The recipient is anyone else. Mail has no outbound reputation and no port 25 path off the host (the
- *     DNS is SPF `-all` on purpose until sending exists), so this path needs the relay the plan names as M3. When
- *     MAIL_RELAY_HOST is set, the reply goes there with STARTTLS and AUTH; when it is not, the send is refused in
- *     plain words and the caller says so. Nothing is ever pretended to have left.
+ *   * LOCAL — always available. The recipient is on one of our own domains (openvibe.email, a mask domain, a burner
+ *     domain). The mail server already takes mail for these over loopback, so Mail submits it there on port 25 with
+ *     no relay and no credentials, and no packet leaves the host.
+ *   * OUTBOUND — OFF by default. Sending to anyone else is not ours yet: the plan puts it in M2, and it waits on the
+ *     owner (a separate mail IPv4, its PTR record, and Workers Paid for the relay). MAIL_OUTBOUND=on is what turns
+ *     it on; only then is the outbound relay (MAIL_RELAY_HOST) even considered. With the switch off, routeFor
+ *     answers null before any connection is made, so a reply to a stranger never opens a socket outward — the caller
+ *     turns it into the person's approval instead.
  *
  * Every send is written to mail_sent_mail in the same commit as its outcome, so an agent's page can show what it
  * answered and a person can see what left their address in their name.
@@ -20,15 +20,23 @@
 const { sql } = require('openvibe-sdk/db');
 const reply = require('./agent-reply');
 
+/** The words a person reads when a reply cannot go outside OpenVibe yet. */
+const OUTBOUND_CLOSED = 'OpenVibe Mail cannot send outside OpenVibe yet: the reply waits here.';
+
 /**
- * Where a reply for this recipient goes: 'local' (the mail server on loopback) or 'relay' (the configured outbound
- * relay), and the SMTP settings for it. `null` when the recipient is not local and no relay is configured.
+ * Where a reply for this recipient goes: 'local' (the mail server on loopback) or 'relay' (the outbound relay, only
+ * with MAIL_OUTBOUND on), and the SMTP settings for it. `null` when a reply may not be sent there at all — which is
+ * every address outside our own domains until outbound is switched on.
  */
 function routeFor(recipient, config) {
     if (reply.isLocalAddress(recipient, config.addresses)) {
         const local = config.localSubmission;
         return { kind: 'local', host: local.host, port: local.port, starttls: false, user: null, password: null, timeoutMs: reply.LOCAL_TIMEOUT_MS };
     }
+    // Outbound mail is not ours to send yet (plan M2, waiting on the owner). A switch, off by default, is the only
+    // way on; with it off nothing here reads the relay's settings and no connection is ever opened.
+    const outbound = config.outbound;
+    if (!outbound || !outbound.enabled) return null;
     const relay = config.relay;
     if (!relay || !relay.host) return null;
     return {
@@ -36,6 +44,12 @@ function routeFor(recipient, config) {
         starttls: relay.starttls, user: relay.user, password: relay.password, timeoutMs: reply.TIMEOUT_MS,
     };
 }
+
+/** Can a reply go to this address at all (locally, or outside once the owner turns outbound on)? */
+const canSendTo = (recipient, config) => Boolean(routeFor(recipient, config));
+
+/** Is this address on one of our own domains? Then a reply to it never leaves the host. */
+const isLocal = (recipient, config) => reply.isLocalAddress(recipient, config.addresses);
 
 /**
  * Send one reply FROM an agent's inbox and record it. Answers mail.agent-reply-result@1:
@@ -57,7 +71,7 @@ async function sendReply({ db, config, inbox, owner, to, body, subject = null, i
     const route = routeFor(recipient, config);
     let outcome;
     if (!route) {
-        outcome = { ok: false, code: 0, reason: `There is no way to send mail to ${recipient} from OpenVibe yet: the outbound relay is not configured.` };
+        outcome = { ok: false, code: 0, reason: OUTBOUND_CLOSED };
     } else {
         outcome = await mailer.sendMessage(route, { from, to: recipient, message: built });
     }
@@ -79,4 +93,4 @@ async function sendReply({ db, config, inbox, owner, to, body, subject = null, i
     };
 }
 
-module.exports = { sendReply, routeFor };
+module.exports = { sendReply, routeFor, canSendTo, isLocal, OUTBOUND_CLOSED };

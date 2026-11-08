@@ -202,18 +202,29 @@ test('a reply comes FROM the agent inbox, goes only to the sender, and stays in 
     });
     assert.strictEqual(stranger.status, 422);
 
-    // The local platform has no outbound relay in this test, so a reply to an outside address is refused honestly.
+    // Outbound mail is OFF by default (plan M2, waiting on the owner), so a reply to an outside address is refused
+    // with a stable code the agent's system turns into the person's approval. Nothing was sent, nothing was lost.
     const outside = await s.post('/internal/mail/agents/helper/reply', { ...token, json: { message_id: letter.id, body: 'Tuesday at 10 works.' } });
-    assert.strictEqual(outside.status, 502);
-    assert.deepStrictEqual(outside.body, { sent: false, message_id: null, rfc_message_id: null, reason: 'There is no way to send mail to dana@example.net from OpenVibe yet: the outbound relay is not configured.' });
+    assert.strictEqual(outside.status, 409);
+    assert.deepStrictEqual(outside.body, {
+        sent: false, message_id: null, rfc_message_id: null,
+        reason: 'OpenVibe Mail cannot send outside OpenVibe yet: the reply waits here.',
+        code: 'mail.outbound_closed',
+    });
     assert.strictEqual(smtp.sent.length, 0, 'nothing left, and nothing was pretended');
 
-    // With a relay configured, it is handed over: from the agent's address, to the sender, in the thread.
-    const relayed = await boot({ smtp, env: { MAIL_RELAY_HOST: 'relay.example.net', MAIL_RELAY_USER: 'openvibe', MAIL_RELAY_PASSWORD: 'x' } });
+    // The switch is readable, so the agent's card can say the reply will wait.
+    const state = await s.get('/internal/mail/outbound', token);
+    assert.deepStrictEqual(state.body, { enabled: false, reason: 'OpenVibe Mail cannot send outside OpenVibe yet: the reply waits here.' });
+
+    // With outbound switched ON and a relay configured, it is handed over: from the agent's address, to the sender,
+    // in the thread.
+    const relayed = await boot({ smtp, env: { MAIL_OUTBOUND: 'on', MAIL_RELAY_HOST: 'relay.example.net', MAIL_RELAY_USER: 'openvibe', MAIL_RELAY_PASSWORD: 'x' } });
     t.after(() => relayed.close());
     const alice2 = relayed.network.addUser('alice');
     const helper2 = (await relayed.post('/api/v1/agent-inboxes', { as: alice2, json: { agent_id: 'helper' } })).body.agent_inbox;
     helper2.__mailbox = await relayed.db.value('SELECT address FROM mail_mailboxes WHERE owner_subject = $1', [alice2.subject]);
+    assert.strictEqual((await relayed.get('/internal/mail/outbound', asActor(relayed, alice2))).body.enabled, true);
     const letter2 = relayed.mail.deliver({
         mailboxAddress: helper2.__mailbox, to: helper2.address, from: 'dana@example.net',
         subject: 'Re: Tuesday', text: 'Still on?', headers: [{ name: 'Message-ID', value: '<dana-2@example.net>' }, { name: 'References', value: '<root@example.net>' }],
@@ -274,4 +285,63 @@ test('the body is never in a log line', async (t) => {
     const logs = s.logs().join('\n');
     assert.ok(!logs.includes(secret), 'no log line carries the body');
     assert.ok(!logs.includes('dana@example.net'), 'and none names the sender either');
+});
+
+test('with outbound off, a reply to a stranger opens no connection at all and is not recorded as sent', async (t) => {
+    // The SMTP stand-in counts every call, and fails the test if one is made: the switch must decide before any
+    // connection is opened, not after a refused one.
+    let calls = 0;
+    const smtp = {
+        lastRoute: null,
+        async sendMessage(route) { calls += 1; smtp.lastRoute = route; return { ok: true, code: 250, reason: null }; },
+    };
+    const s = await boot({ smtp });
+    t.after(() => s.close());
+    const alice = s.network.addUser('alice');
+    const helper = (await s.post('/api/v1/agent-inboxes', { as: alice, json: { agent_id: 'helper' } })).body.agent_inbox;
+    helper.__mailbox = await s.db.value('SELECT address FROM mail_mailboxes WHERE owner_subject = $1', [alice.subject]);
+
+    const stranger = s.mail.deliver({
+        mailboxAddress: helper.__mailbox, to: helper.address, from: 'dana@example.net',
+        subject: 'Hello', text: 'Are you there?', headers: [{ name: 'Message-ID', value: '<dana-3@example.net>' }],
+    });
+    const out = await s.post('/internal/mail/agents/helper/reply', {
+        ...asActor(s, alice), json: { message_id: stranger.id, body: 'Yes.' },
+    });
+    assert.strictEqual(out.status, 409);
+    assert.strictEqual(out.body.code, 'mail.outbound_closed');
+    assert.strictEqual(calls, 0, 'no SMTP connection was opened');
+
+    const row = await s.db.maybe('SELECT * FROM mail_sent_mail WHERE inbox_id = $1', [helper.id]);
+    assert.deepStrictEqual([row.sent, row.transport], [false, 'none']);
+
+    // A reply to one of the OWNER's own addresses is local, so it still goes — no outbound needed.
+    const mine = s.mail.deliver({
+        mailboxAddress: helper.__mailbox, to: helper.address, from: helper.__mailbox,
+        subject: 'A note', text: 'Remember the thing.', headers: [{ name: 'Message-ID', value: '<self-1@openvibe.email>' }],
+    });
+    const local = await s.post('/internal/mail/agents/helper/reply', {
+        ...asActor(s, alice), json: { message_id: mine.id, body: 'Noted.' },
+    });
+    assert.strictEqual(local.status, 200, local.text);
+    assert.strictEqual(local.body.sent, true);
+    assert.strictEqual(calls, 1, 'the local delivery is the one call');
+    assert.strictEqual(smtp.lastRoute.kind, 'local');
+
+    // The owner's own MASK and BURNER addresses are on our own domains too, so a reply to either is local and needs
+    // no outbound switch: the review's "the owner's own openvibe.email addresses (their mailbox, masks and burners)".
+    const mask = (await s.post('/api/v1/masks', { as: alice, json: { label: 'shop' } })).body.mask;
+    const burner = (await s.post('/api/v1/burners', { as: alice, json: { expires: '1h' } })).body.burner;
+    for (const [name, address] of [['mask', mask.address], ['burner', burner.address]]) {
+        const fromThem = s.mail.deliver({
+            mailboxAddress: helper.__mailbox, to: helper.address, from: address,
+            subject: `From my ${name}`, text: 'Hello from me.', headers: [{ name: 'Message-ID', value: `<own-${name}@example.net>` }],
+        });
+        const answer = await s.post('/internal/mail/agents/helper/reply', {
+            ...asActor(s, alice), json: { message_id: fromThem.id, body: 'Noted.' },
+        });
+        assert.strictEqual(answer.status, 200, `${name}: ${answer.text}`);
+        assert.strictEqual(answer.body.sent, true, `${name} is local`);
+        assert.strictEqual(smtp.lastRoute.kind, 'local', `${name} needs no outbound`);
+    }
 });

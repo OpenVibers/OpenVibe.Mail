@@ -108,9 +108,16 @@ restart never announces it twice. Spam, a blocked sender and the inbox's own add
 The agent's system then acts on the event. It reads the whole letter in plain text through `mail.agent.read`
 (loopback, first-party service token, the person named in `X-OV-Subject`), and answers through `mail.agent.reply`:
 the reply is sent **from the agent's address**, to the sender of the letter and to nobody else, plain text, with
-`In-Reply-To`/`References` read from the letter itself. Delivery is local when the recipient is on one of our own
-domains; anyone else needs the outbound relay, which does not exist yet, so such a reply is refused in plain words
-(`sent: false`) and nothing pretends to have left. Every send is recorded in `mail_sent_mail` with its outcome.
+`In-Reply-To`/`References` read from the letter itself. Every send is recorded in `mail_sent_mail` with its outcome.
+
+**Outbound is not ours yet.** A reply goes only to one of the owner's own `openvibe.email` addresses — their
+mailbox, a mask, a burner — which is local delivery on our own server, no packet off the host. Sending to anyone
+else is plan M2 and waits on the owner (a separate mail IPv4, its PTR record, Workers Paid for the relay), so it is
+behind a switch that is **off by default**: `MAIL_OUTBOUND=on` is the only way on. With it off, `routeFor` answers
+before any connection is opened, `POST …/reply` answers `409 mail.outbound_closed` with the plain sentence "OpenVibe
+Mail cannot send outside OpenVibe yet: the reply waits here", and the agent's system turns that into the person's
+send approval: the reply stays pending, nothing is sent and nothing is lost. `GET /internal/mail/outbound` says
+whether the switch is on, so the approval card can say so itself.
 
 ## Contracts
 

@@ -118,8 +118,15 @@ function load(overrides = null) {
             port: int('MAIL_SMTP_PORT', 25),
         },
 
-        // The outbound relay (plan M3, "a mail relay" among the owner's own items). Until it exists, a reply to an
-        // address outside our own domains is refused in plain words. Nothing here is printed or logged.
+        // Outbound mail is not ours to send yet (plan M2: it waits on the owner for a separate mail IPv4, its PTR
+        // record, and Workers Paid for the relay). MAIL_OUTBOUND=on is the only way on, and OFF is the default: with
+        // it off Mail sends only to its own domains over loopback, and a reply to anyone else never opens a socket.
+        outbound: {
+            enabled: /^(1|true|on|yes)$/i.test(String(env.MAIL_OUTBOUND || '').trim()),
+        },
+
+        // The outbound relay, read only when outbound is switched on. Until it exists, a reply to an address outside
+        // our own domains is refused in plain words. Nothing here is printed or logged.
         relay: {
             host: env.MAIL_RELAY_HOST || '',
             port: int('MAIL_RELAY_PORT', 587),

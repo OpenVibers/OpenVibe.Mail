@@ -174,8 +174,25 @@ function mountAgentMail(app, { db, config, stalwart, principal, keys, smtp = nul
             now,
             smtp,
         });
+        // "Outbound is closed" is not a failure of the agent's answer: the agent's system parks it for the person's
+        // decision instead. A stable status and code say so, so no caller has to read English to know.
+        if (!result.sent && result.reason === sending.OUTBOUND_CLOSED) {
+            return res.status(409).json({ ...result, code: 'mail.outbound_closed' });
+        }
         return res.status(result.sent ? 200 : 502).json(result);
     }));
+
+    /**
+     * Can Mail send outside OpenVibe at all? The agent's system asks this before it turns a reply to a stranger into
+     * the person's approval, so the card can say plainly that the reply will wait. Loopback, first-party token.
+     */
+    app.get('/internal/mail/outbound', guard('mail.agent.reply'), (req, res) => {
+        const enabled = Boolean(config.outbound && config.outbound.enabled);
+        return res.json({
+            enabled,
+            reason: enabled ? null : sending.OUTBOUND_CLOSED,
+        });
+    });
 
     // ---- the person's own switch and block list ---------------------------------------------------------------
 
