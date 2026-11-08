@@ -3,13 +3,13 @@
   "stage": "alpha",
   "code": true,
   "wave": "M1",
-  "plan": "OpenVibe Seven Domains Plan (2026-11-07) \u00a78, M1: Stalwart receiving, masks, burners and agent inboxes; HO6 (channels): an agent answers the mail sent to its own address",
+  "plan": "OpenVibe Seven Domains Plan (2026-11-07) §8, M1: Stalwart receiving, masks, burners and agent inboxes; HO6 (channels): an agent answers the mail sent to its own address",
   "runtime": "node 22, express, PostgreSQL 18 (openvibe-sdk/db), Stalwart Community 1.0.3 (AGPL-3.0-only), local filesystem blobs (S3 optional)",
   "port": 5250,
   "domain": "openvibe.email; receive-only MX. The API is public through nginx (deploy/nginx/openvibe.email.conf); no UI yet.",
   "contracts": "openvibe-contracts v0.342.0",
   "sdk": "openvibe-sdk v0.97.1",
-  "shared": "openvibe-shared v4.149.0",
+  "shared": "openvibe-shared v4.150.0",
   "contractsProposed": [],
   "stalwart": {
     "version": "1.0.3",
@@ -74,7 +74,6 @@
     "cors": "Bearer from any first-party origin in the Contracts manifests; cookie writes only same-origin on openvibe.email",
     "trustProxy": 2
   },
-  "updated": "2026-11-08",
   "agentMail": {
     "switch": "off by default, per agent; the poll walks only inboxes whose switch is on",
     "poll": "due-based, under its own lease in mail_settings; a message is announced once (the row and the event commit together)",
@@ -83,5 +82,6 @@
     "reply": "POST /internal/mail/agents/:agent_id/reply (mail.agent.reply), from the inbox address, to the sender only, plain text",
     "delivery": "a reply to the owner's own openvibe.email addresses (mailbox, masks, burners) is handed to the mail server over loopback SMTP. Sending outside OpenVibe is not ours yet (plan M2, waiting on the owner): MAIL_OUTBOUND=on is the only way on and it is OFF by default, so with it off such a reply opens no connection and answers 409 mail.outbound_closed, which the agent's system turns into the person's send approval (the reply waits, nothing is sent, nothing is lost)",
     "outbound": "GET /internal/mail/outbound says whether Mail may send outside OpenVibe, so an approval card can say plainly that the reply will wait"
-  }
+  },
+  "updated": "2026-11-08"
 }
