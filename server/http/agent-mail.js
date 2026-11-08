@@ -21,7 +21,7 @@
 const { serviceAuth } = require('openvibe-contracts');
 const answering = require('../domain/agent-answering');
 const sending = require('../domain/sending');
-const { findAgentInbox } = require('../domain/agent-inboxes');
+const { createAgentInbox, findAgentInbox } = require('../domain/agent-inboxes');
 const { mailboxAddressFor } = require('../domain/mailboxes');
 
 const ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
@@ -193,6 +193,42 @@ function mountAgentMail(app, { db, config, stalwart, principal, keys, smtp = nul
             reason: enabled ? null : sending.OUTBOUND_CLOSED,
         });
     });
+
+    /**
+     * The agent's switch, by the agent's name in the address, for the agent's own system to show on its page
+     * (GET) and for the person to turn on through that page (PUT). Loopback under a first-party token with the person
+     * in X-OV-Subject — exactly the read route above, so the page needs one credential, not the person's own token.
+     *
+     * The POST makes the address if it does not exist yet: an agent's page shows its address before any letter has
+     * arrived, and an address Mail has not made is one no letter is ever checked against. Making it is idempotent, so
+     * a page that asks on every load changes nothing after the first.
+     */
+    app.post('/internal/mail/agents/:agentId/inbox', guard('mail.agent.answering'), wrap(async (req, res) => {
+        const who = personFor(req);
+        const agentId = String(req.params.agentId || '');
+        if (who.error || !AGENT_RE.test(agentId)) return res.status(404).json({ status: 404, code: 'mail.not_found', detail: 'That inbox does not exist.' });
+        try {
+            const inbox = await createAgentInbox({ db, config, owner: who.subject, agentId });
+            return res.json({ agent_inbox: inbox });
+        } catch (err) {
+            if (err && err.status) return res.status(err.status).json({ status: err.status, code: err.code || 'mail.error', detail: err.message });
+            throw err;
+        }
+    }));
+
+    app.get('/internal/mail/agents/:agentId/answering', guard('mail.agent.read'), wrap(async (req, res) => {
+        const inbox = await inboxFor(req);
+        if (!inbox) return res.status(404).json({ status: 404, code: 'mail.not_found', detail: 'That inbox does not exist.' });
+        return res.json(await answering.getAnswering({ db, owner: inbox.owner, inbox }));
+    }));
+
+    app.put('/internal/mail/agents/:agentId/answering', guard('mail.agent.answering'), wrap(async (req, res) => {
+        const inbox = await inboxFor(req);
+        if (!inbox) return res.status(404).json({ status: 404, code: 'mail.not_found', detail: 'That inbox does not exist.' });
+        const asked = req.body && req.body.enabled;
+        const enabled = asked === true || asked === 'true' || asked === 'on' || asked === 1;
+        return res.json(await answering.setAnswering({ db, owner: inbox.owner, inbox, enabled, now }));
+    }));
 
     // ---- the person's own switch and block list ---------------------------------------------------------------
 

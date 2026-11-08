@@ -345,3 +345,41 @@ test('with outbound off, a reply to a stranger opens no connection at all and is
         assert.strictEqual(smtp.lastRoute.kind, 'local', `${name} needs no outbound`);
     }
 });
+
+test('the agent system can make its inbox and read/set its switch, and only for its own person', async (t) => {
+    const s = await boot({ smtp: fakeSmtp() });
+    t.after(() => s.close());
+    const alice = s.network.addUser('alice');
+    const bob = s.network.addUser('bob');
+    const caps = ['mail.agent.read', 'mail.agent.reply', 'mail.agent.answering'];
+
+    // The agent's page asks for its address before any letter has arrived. Mail makes it, once.
+    const made = await s.post('/internal/mail/agents/helper/inbox', asActor(s, alice, caps));
+    assert.strictEqual(made.status, 200, made.text);
+    const inbox = made.body.agent_inbox;
+    assert.deepStrictEqual([inbox.agent_id, inbox.owner], ['helper', alice.subject]);
+    assert.ok(inbox.address.endsWith('@openvibe.email'));
+    const again = await s.post('/internal/mail/agents/helper/inbox', asActor(s, alice, caps));
+    assert.strictEqual(again.body.agent_inbox.id, inbox.id, 'asking twice gives the same address');
+
+    // The switch stays the person's: the agent's system can read it, and the page can turn it on for them.
+    const off = await s.get('/internal/mail/agents/helper/answering', asActor(s, alice, caps));
+    assert.deepStrictEqual([off.status, off.body.enabled, off.body.address], [200, false, inbox.address]);
+    const on = await s.put('/internal/mail/agents/helper/answering', { ...asActor(s, alice, caps), json: { enabled: true } });
+    assert.deepStrictEqual([on.status, on.body.enabled], [200, true]);
+    assert.ok((await s.get('/internal/mail/agents/helper/answering', asActor(s, alice, caps))).body.enabled);
+    // The person's own route agrees.
+    assert.strictEqual((await s.get(`/api/v1/agent-inboxes/${inbox.id}/answering`, { as: alice })).body.enabled, true);
+
+    // Another person asking for the same agent name gets their own inbox, never Alice's.
+    const bobs = await s.post('/internal/mail/agents/helper/inbox', asActor(s, bob, caps));
+    assert.strictEqual(bobs.status, 200, bobs.text);
+    assert.notStrictEqual(bobs.body.agent_inbox.id, inbox.id);
+    assert.strictEqual(bobs.body.agent_inbox.owner, bob.subject);
+
+    // A token without mail.agent.answering cannot make or set it; a token that names nobody makes nothing.
+    assert.strictEqual((await s.post('/internal/mail/agents/helper/inbox', asActor(s, alice, ['mail.agent.read']))).status, 403);
+    assert.strictEqual((await s.put('/internal/mail/agents/helper/answering', { ...asActor(s, alice, ['mail.agent.read']), json: { enabled: true } })).status, 403);
+    const anonymous = s.network.signJwt({ iss: s.network.url, sub: 'svc:actor', actor_type: 'service', aud: ['openvibe.mail'], cap: caps, iat: Math.floor(Date.now() / 1000), exp: Math.floor(Date.now() / 1000) + 300, jti: 'test-ho6-no-person' });
+    assert.strictEqual((await s.post('/internal/mail/agents/helper/inbox', { bearer: anonymous })).status, 404);
+});
