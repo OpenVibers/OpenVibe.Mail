@@ -66,6 +66,10 @@ test('the internal owner-address check accepts exact owned addresses only', asyn
         assert.strictEqual(found.status, 200, found.text);
         assert.strictEqual(found.body.owned, false);
     }
+    await s.db.query('UPDATE mail_masks SET enabled = false WHERE id = $1', [mask.id]);
+    await s.db.query("UPDATE mail_burners SET expires_at = now() - interval '1 second' WHERE id = $1", [burner.id]);
+    assert.strictEqual((await s.get(url(mask.address), auth)).body.owned, false);
+    assert.strictEqual((await s.get(url(burner.address), auth)).body.owned, false);
     assert.strictEqual((await s.get(url(mailbox), asActor(s, bob))).body.owned, false);
     assert.strictEqual((await s.get(url(mailbox), asActor(s, alice, ['mail.agent.reply']))).status, 403);
 });
