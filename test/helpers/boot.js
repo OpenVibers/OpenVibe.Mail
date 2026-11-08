@@ -51,7 +51,7 @@ async function boot(opts = {}) {
     const store = createStore((await testDb()).db, { now: opts.now });
 
     const { createApp } = require('../../server/app');
-    const built = await createApp({ config, store, stalwart: mail, log });
+    const built = await createApp({ config, store, stalwart: mail, log, smtp: opts.smtp || null });
     await built.ctx.keys.ensure();
 
     const server = await new Promise((resolve) => {
@@ -80,10 +80,23 @@ async function boot(opts = {}) {
         return { status: res.status, body: parsed, text, headers: res.headers };
     }
 
+    // The agent-mail poll, run on demand: the service starts it on a timer, a test wants the run itself.
+    const { runDue } = require('../../server/jobs/agent-mail');
+    // A manual run: the poll's own lease would otherwise make a second run inside a minute do nothing, which is
+    // right in production and wrong in a test that wants two runs back to back.
+    const agentMail = {
+        runNow: async () => {
+            if (store.db.exec) await store.db.exec(require('openvibe-sdk/db').sql`DELETE FROM mail_settings WHERE key = 'agent_mail_lease'`);
+            return runDue({ db: store.db, stalwart: mail, events: built.ctx.events, config, log, now: opts.now });
+        },
+    };
+
     return {
         base,
+        ctx: { ...built.ctx, agentMail },
         network,
         mail,
+        smtp: opts.smtp || null,
         store,
         config,
         db: store.db,
@@ -91,6 +104,7 @@ async function boot(opts = {}) {
         clearLogs: () => { captured.length = 0; },
         get: (p, o) => call('GET', p, o),
         post: (p, o) => call('POST', p, o),
+        put: (p, o) => call('PUT', p, o),
         del: (p, o) => call('DELETE', p, o),
         options: (p, o) => call('OPTIONS', p, o),
         close: async () => {

@@ -13,6 +13,7 @@ const { createApp } = require('./app');
 const { createEvents } = require('./events');
 const { createStalwartClient } = require('./stalwart/client');
 const { startPurgeJob } = require('./jobs/purge');
+const { startAgentMailJob } = require('./jobs/agent-mail');
 
 async function main() {
     const config = configLib.load();
@@ -46,6 +47,10 @@ async function main() {
         log,
     });
 
+    // An agent answers the mail sent to its own address (track HO6): the due poll that announces a letter once,
+    // for an inbox whose switch the person turned on. Its own lease, so a long purge never blocks it.
+    const agentMail = startAgentMailJob({ db, stalwart, events, config, log });
+
     const { app } = await createApp({ config, store, stalwart, events, log });
 
     const server = app.listen(config.port, config.host, () => {
@@ -55,6 +60,7 @@ async function main() {
     const shutdown = async (signal) => {
         log.info(`[OpenVibe.Mail] ${signal}: stopping`);
         purge.stop();
+        agentMail.stop();
         events.stop();
         server.close(() => {
             store.close().finally(() => process.exit(0));
@@ -64,7 +70,7 @@ async function main() {
     process.on('SIGTERM', () => shutdown('SIGTERM'));
     process.on('SIGINT', () => shutdown('SIGINT'));
 
-    return { server, store, stalwart, events, purge };
+    return { server, store, stalwart, events, purge, agentMail };
 }
 
 if (require.main === module) {

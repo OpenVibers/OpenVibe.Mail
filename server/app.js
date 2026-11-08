@@ -119,6 +119,10 @@ async function createApp(opts = {}) {
     app.use('/api/v1', principal.middleware);
     app.use(createApi({ db: store.db, config, stalwart, events, principal, log }));
 
+    // The agent's own system (track HO6): one letter in full text and the reply to it, loopback only under a
+    // first-party service token; and the person's own answering switch and block list.
+    require('./http/agent-mail').mountAgentMail(app, { db: store.db, config, stalwart, principal, keys, smtp: opts.smtp || null, now: opts.now, log });
+
     // openvibe.email's page, its files and Shared's (server/http/pages.js).
     require('./http/pages').mountPages(app, { config });
 

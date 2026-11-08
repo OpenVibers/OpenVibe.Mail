@@ -23,7 +23,7 @@ function createFakeStalwart() {
         mailboxes,
 
         /** Put a message in a mailbox, as if it had arrived; the first header is the server's own stamp. */
-        deliver({ mailboxAddress, to, from = 'tester@example.net', subject = 'Hello', text = '', html = '', receivedAt = null, headers = [], attachments = [] }) {
+        deliver({ mailboxAddress, to, from = 'tester@example.net', subject = 'Hello', text = '', html = '', receivedAt = null, headers = [], attachments = [], spam = false }) {
             counter += 1;
             const message = {
                 id: `m${counter}`,
@@ -33,9 +33,12 @@ function createFakeStalwart() {
                 receivedAt: receivedAt || new Date().toISOString(),
                 text,
                 html,
+                spam: Boolean(spam),
                 headers: [
                     { name: 'Delivered-To', value: ` ${String(to).toLowerCase()}` },
-                    ...headers,
+                    ...(headers.some((h) => String(h && h.name || '').toLowerCase() === 'message-id')
+                        ? headers
+                        : [{ name: 'Message-ID', value: `<fixture-${counter}@example.net>` }, ...headers]),
                 ],
                 attachments,
             };
@@ -68,9 +71,20 @@ function createFakeStalwart() {
                     to: m.to.map((a) => a.email),
                     subject: m.subject,
                     receivedAt: m.receivedAt,
-                    spam: false,
+                    spam: Boolean(m.spam),
                     headers: m.headers,
                 }));
+        },
+
+        /** One message, when the server stamped it for this recipient (the real client's readForRecipient). */
+        async readForRecipient({ mailboxAddress, recipient, id }) {
+            const all = mailboxes.get(String(mailboxAddress || '').toLowerCase()) || [];
+            const message = all.find((m) => m.id === id);
+            if (!message) return null;
+            const stamp = (message.headers || []).find((h) => String(h && h.name || '').toLowerCase() === 'delivered-to');
+            const deliveredTo = stamp ? String(stamp.value || '').trim().toLowerCase() : null;
+            if (deliveredTo !== String(recipient || '').trim().toLowerCase()) return null;
+            return this.readMessage({ mailboxAddress, id });
         },
 
         async messageBody({ mailboxAddress, id }) {
@@ -99,8 +113,22 @@ function createFakeStalwart() {
         async readMessage({ mailboxAddress, id }) {
             const m = (mailboxes.get(String(mailboxAddress || '').toLowerCase()) || []).find((x) => x.id === id && !x.trashed);
             if (!m) return null;
-            return { id: m.id, from: m.from.map((a) => a.email), to: m.to.map((a) => a.email), cc: [], subject: m.subject, date: m.receivedAt, unread: !m.seen, text: m.text || '', html: m.html || '',
-                attachments: (m.attachments || []).map((a) => ({ part: a.part, blobId: `b-${a.part}`, name: a.name, type: a.type, size: a.bytes.length })) };
+            const headers = m.headers || [];
+            const valueOf = (name) => {
+                const found = headers.find((h) => String(h && h.name || '').toLowerCase() === name);
+                return found ? String(found.value || '') : '';
+            };
+            const idOf = (raw) => { const x = /<([^<>\s]{1,995})>/.exec(String(raw || '')); return x ? x[1] : null; };
+            const refs = [...String(valueOf('references')).matchAll(/<([^<>\s]{1,995})>/g)].map((x) => x[1]).slice(0, 100);
+            const stamp = headers.find((h) => String(h && h.name || '').toLowerCase() === 'delivered-to');
+            return {
+                id: m.id, from: m.from.map((a) => a.email), to: m.to.map((a) => a.email), cc: [], subject: m.subject, date: m.receivedAt, unread: !m.seen,
+                spam: Boolean(m.spam),
+                deliveredTo: stamp ? String(stamp.value || '').trim().toLowerCase() : null,
+                threadHeaders: { messageId: idOf(valueOf('message-id')), inReplyTo: idOf(valueOf('in-reply-to')), references: refs },
+                text: m.text || '', html: m.html || '',
+                attachments: (m.attachments || []).map((a) => ({ part: a.part, blobId: `b-${a.part}`, name: a.name, type: a.type, size: a.bytes.length })),
+            };
         },
         async readAttachment({ mailboxAddress, id, part }) {
             const m = (mailboxes.get(String(mailboxAddress || '').toLowerCase()) || []).find((x) => x.id === id && !x.trashed);

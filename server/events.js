@@ -3,19 +3,23 @@
 /**
  * The events OpenVibe.Mail publishes.
  *
- * Two, and only two:
+ * Three:
  *
- *   mail.mask.created   a person made a mask;
- *   mail.received       a message arrived for one of our addresses.
+ *   mail.mask.created          a person made a mask;
+ *   mail.received              a message arrived for one of our addresses;
+ *   mail.agent_inbox.received  a message arrived for an agent's address whose answering is on.
  *
- * Neither carries a message body, a subject line or a code. mail.received says that mail arrived, for which
- * address, when, and from whom — that is what an agent needs to decide whether to look, and everything else is
- * the person's mail and stays where it is.
+ * None of them carries an attachment or an HTML body. mail.received says that mail arrived, for which address,
+ * when, and from whom — that is what an agent needs to decide whether to look. mail.agent_inbox.received goes
+ * further because the person said their agent may answer: it carries the subject and a plain-text excerpt of at
+ * most 4000 characters, never the whole body, and never the HTML. The agent's system reads the full text through
+ * mail.agent.read, on the owner's behalf, once it has decided to answer.
  */
 const { ids } = require('openvibe-contracts');
 const { createServiceOutbox } = require('openvibe-sdk/events');
 
 const SOURCE = 'mail';
+const AGENT_EVENT_TYPES = ['mail.mask.created', 'mail.received', 'mail.agent_inbox.received'];
 
 function createEvents({ db, config, now = () => Date.now(), log = console } = {}) {
     const outbox = createServiceOutbox({
@@ -28,7 +32,7 @@ function createEvents({ db, config, now = () => Date.now(), log = console } = {}
         intervalMs: config.events.intervalMs,
         now,
         log,
-        eventTypes: ['mail.mask.created', 'mail.received'],
+        eventTypes: AGENT_EVENT_TYPES,
     });
 
     function envelope({ type, actor, subject, payload, timestamp = new Date(now()).toISOString() }) {
@@ -81,7 +85,40 @@ function createEvents({ db, config, now = () => Date.now(), log = console } = {}
         });
     }
 
-    return { outbox, envelope, maskCreated, messageReceived, start: () => outbox.start(), stop: () => outbox.stop() };
+    /**
+     * mail.agent_inbox.received — a message arrived at an agent's address and the person's switch for it is on, so
+     * their agent may answer it. The subject and a plain-text excerpt (at most 4000 characters) are here because
+     * the agent's system decides from them whether to read the whole letter; the whole body, the HTML and the
+     * attachments are not, and never reach an event.
+     */
+    function agentInboxReceived({ inbox, owner, message }) {
+        return envelope({
+            type: 'mail.agent_inbox.received',
+            actor: { type: 'user', id: owner },
+            subject: { type: 'mail.agent-inbox', id: inbox.id },
+            payload: {
+                inbox_id: inbox.id,
+                inbox: inbox.address,
+                agent_id: inbox.agent_id,
+                owner,
+                message_id: message.id,
+                from: Array.isArray(message.from) ? message.from[0] : message.from,
+                subject: message.subject || null,
+                excerpt: message.excerpt || '',
+                received_at: message.receivedAt || null,
+            },
+        });
+    }
+
+    return {
+        outbox,
+        envelope,
+        maskCreated,
+        messageReceived,
+        agentInboxReceived,
+        start: () => outbox.start(),
+        stop: () => outbox.stop(),
+    };
 }
 
 module.exports = { createEvents, SOURCE };
