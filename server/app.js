@@ -70,6 +70,8 @@ async function createApp(opts = {}) {
 
     app.use(contracts.http.middleware());
     app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
+    // Amazon SNS posts its JSON as text/plain; every other provider sends application/json.
+    app.use('/api/v1/mail/provider-webhooks', express.json({ type: ['application/json', 'text/plain'], limit: '256kb', verify: (req, _res, buffer) => { req.rawBody = Buffer.from(buffer); } }));
     app.use(express.json({ limit: '16kb' }));
     // Nothing here is cacheable: a person's addresses and sign-in are private, and a machine answer is live.
     app.use(['/api', '/auth'], (_req, res, next) => {
@@ -117,7 +119,7 @@ async function createApp(opts = {}) {
     }));
 
     app.use('/api/v1', principal.middleware);
-    app.use(createApi({ db: store.db, config, stalwart, events, principal, log, smtp: opts.smtp || null, imap: opts.imap || null }));
+    app.use(createApi({ db: store.db, config, stalwart, events, principal, log, smtp: opts.smtp || null, fetchImpl, imap: opts.imap || null }));
 
     // The agent's own system (track HO6): one letter in full text and the reply to it, loopback only under a
     // first-party service token; and the person's own answering switch and block list.

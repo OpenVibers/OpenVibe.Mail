@@ -35,11 +35,14 @@ const burners = require('../domain/burners');
 const agentInboxes = require('../domain/agent-inboxes');
 const messages = require('../domain/messages');
 const answering = require('../domain/agent-answering');
+const outboundProviders = require('../domain/outbound-providers');
+const providerWebhooks = require('../domain/provider-webhooks');
+const providerDomains = require('../domain/provider-domains');
 
 /** Whether this inbox answers mail (track HO6): off unless the person turned it on. */
 const agentInboxesAnswering = (db, owner, inbox) => answering.getAnswering({ db, owner, inbox });
 
-function createApi({ db, config, stalwart, events, principal, log = console, smtp = null, imap = null }) {
+function createApi({ db, config, stalwart, events, principal, log = console, smtp = null, fetchImpl = globalThis.fetch, imap = null }) {
     const router = express.Router();
     const requirePerson = principal.requirePerson;
 
@@ -61,6 +64,52 @@ function createApi({ db, config, stalwart, events, principal, log = console, smt
     function fail(req, res, status, code, detail) {
         return http.sendProblem(res, status, code, { detail, ctx: req.ov });
     }
+
+    // Provider keys and spend limits belong to the Network owner. Hide this surface from every other rank and from
+    // app tokens; a provider credential is only accepted over the service's encrypted-at-rest vault.
+    const ownerOnly = (req, res, next) => {
+        if (!req.principal || req.principal.kind !== 'user' || req.principal.role !== 'owner') {
+            return fail(req, res, 404, 'route.not_found', 'No such API route.');
+        }
+        return next();
+    };
+    router.post('/api/v1/mail/provider-webhooks/:providerId', wrap(async (req, res) => {
+        try {
+            const result = await providerWebhooks.handle({ db, config, providerId: req.params.providerId, payload: req.body || {}, rawBody: req.rawBody, headers: req.headers, fetchImpl });
+            return res.status(result.status).json(result.body);
+        } catch (err) {
+            log.warn({ providerId: req.params.providerId }, 'mail provider webhook rejected');
+            return fail(req, res, 400, 'mail.webhook.invalid', 'The provider webhook could not be verified or processed.');
+        }
+    }));
+    router.get('/api/v1/admin/mail/providers', ownerOnly, wrap(async (_req, res) => {
+        const rows = await outboundProviders.list(db);
+        return res.json({ outbound_enabled: Boolean(config.outbound.enabled), providers: rows.map(outboundProviders.publicProvider) });
+    }));
+    router.put('/api/v1/admin/mail/providers/:id', ownerOnly, wrap(async (req, res) => {
+        const input = { ...(req.body || {}), id: req.params.id };
+        try {
+            await outboundProviders.save({ db, config, input });
+            const row = (await outboundProviders.list(db)).find((item) => item.id === req.params.id);
+            return res.json({ provider: outboundProviders.publicProvider(row) });
+        } catch (err) {
+            return fail(req, res, 422, 'mail.provider.invalid', err.message);
+        }
+    }));
+    router.delete('/api/v1/admin/mail/providers/:id', ownerOnly, wrap(async (req, res) => {
+        await outboundProviders.remove(db, req.params.id);
+        return res.status(204).end();
+    }));
+    router.get('/api/v1/admin/mail/domains', ownerOnly, wrap(async (req, res) => {
+        try { return res.json(await providerDomains.list({ db, domain: req.query.domain })); }
+        catch (err) { return fail(req, res, 422, 'mail.domain.invalid', err.message); }
+    }));
+    router.put('/api/v1/admin/mail/domains/:providerId', ownerOnly, wrap(async (req, res) => {
+        try {
+            const domain = await providerDomains.save({ db, providerId: req.params.providerId, input: req.body || {} });
+            return res.json(await providerDomains.list({ db, domain }));
+        } catch (err) { return fail(req, res, 422, 'mail.domain.invalid', err.message); }
+    }));
 
     // ---- the person's front door ---------------------------------------------------------------
 

@@ -3,6 +3,7 @@
 const { sql } = require('openvibe-sdk/db');
 const sending = require('./sending');
 const reply = require('./agent-reply');
+const providers = require('./outbound-providers');
 
 function senderAddress(from) {
     const value = Array.isArray(from) ? String(from[0] || '') : String(from || '');
@@ -34,7 +35,9 @@ async function sendInboxDraft({ db, config, stalwart, smtp, owner, threadId, bod
     if (!String(text || '').trim() || String(text).length > 10000 || String(title || '').length > 2000 || /[\r\n\u0000]/.test(String(title || ''))) {
         return { status: 422, code: 'mail.ai_draft.invalid' };
     }
-    const route = sending.routeFor(to, config);
+    let route = sending.routeFor(to, config);
+    const managed = !sending.isLocal(to, config) && config.outbound && config.outbound.enabled ? await providers.list(db) : [];
+    if (managed.length) route = { kind: 'relay', providerManaged: true };
     if (!route) return { status: 409, code: 'mail.outbound_closed', detail: sending.OUTBOUND_CLOSED };
     const claimed = await db.maybe(sql`UPDATE mail_inbox_ai_threads SET draft_state = 'sending',
         draft_body = ${String(text)}, draft_subject = ${String(title || '')}, updated_at = now()
@@ -47,7 +50,9 @@ async function sendInboxDraft({ db, config, stalwart, smtp, owner, threadId, bod
             messageId, inReplyTo: headers.messageId || null,
             references: [...(headers.references || []), headers.messageId].filter(Boolean), at: now() });
         const mailer = smtp || require('../stalwart/smtp');
-        const result = await mailer.sendMessage(route, { from: mailbox.address, to, message });
+        const result = route.providerManaged
+            ? await providers.sendWithFailover({ db, config, from: mailbox.address, to, message, kind: 'person', smtp: mailer, now: new Date(now()) })
+            : await mailer.sendMessage(route, { from: mailbox.address, to, message });
         if (!result || !result.ok) {
             // Do not retry automatically; a user may explicitly click send again after seeing the failure.
             await db.exec(sql`UPDATE mail_inbox_ai_threads SET draft_state = 'draft', updated_at = now()
