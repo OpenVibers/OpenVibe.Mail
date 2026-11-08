@@ -105,11 +105,20 @@ async function listAgentInboxes({ db, owner }) {
 }
 
 /** One inbox of this person, or null. Somebody else's inbox is not found. */
-async function findAgentInbox({ db, owner, id }) {
-    const row = await db.maybe(sql`
-        SELECT id, owner_subject, agent_id, address, created_at
-          FROM mail_agent_inboxes WHERE id = ${id} AND owner_subject = ${owner}`);
-    return row ? shape(row) : null;
+async function findAgentInbox({ db, owner, id = null, agentId = null }) {
+    if (id) {
+        const row = await db.maybe(sql`
+            SELECT id, owner_subject, agent_id, address, created_at
+              FROM mail_agent_inboxes WHERE id = ${id} AND owner_subject = ${owner}`);
+        return row ? shape(row) : null;
+    }
+    if (agentId) {
+        const row = await db.maybe(sql`
+            SELECT id, owner_subject, agent_id, address, created_at
+              FROM mail_agent_inboxes WHERE agent_id = ${String(agentId).toLowerCase()} AND owner_subject = ${owner}`);
+        return row ? shape(row) : null;
+    }
+    return null;
 }
 
 /** The messages sent to an agent's inbox, newest first. */

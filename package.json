@@ -2,7 +2,7 @@
   "name": "openvibe-mail",
   "version": "0.1.0",
   "private": true,
-  "description": "OpenVibe.Mail — openvibe.email: masks that protect you, burners that self-destruct, and an inbox for every agent.",
+  "description": "OpenVibe.Mail \u2014 openvibe.email: masks that protect you, burners that self-destruct, and an inbox for every agent.",
   "main": "server/index.js",
   "scripts": {
     "start": "node server/index.js",
@@ -27,7 +27,7 @@
     "express": "^4.21.2",
     "express-rate-limit": "^7.5.0",
     "helmet": "^8.1.0",
-    "openvibe-contracts": "https://codeload.github.com/OpenVibers/OpenVibe.Contracts/tar.gz/refs/tags/v0.338.0",
+    "openvibe-contracts": "https://codeload.github.com/OpenVibers/OpenVibe.Contracts/tar.gz/refs/tags/v0.342.0",
     "openvibe-sdk": "https://codeload.github.com/OpenVibers/OpenVibe.SDK/tar.gz/refs/tags/v0.97.1",
     "openvibe-shared": "https://codeload.github.com/OpenVibers/OpenVibe.Shared/tar.gz/refs/tags/v4.148.0",
     "pg": "^8.23.0",

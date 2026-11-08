@@ -138,6 +138,31 @@ function createStalwartClient({ config, fetchImpl = globalThis.fetch, log = cons
     }
 
     /**
+     * The thread a letter belongs to: the Message-ID header (this letter's own id), the id it answers, and the chain
+     * before it. All bare — no angle brackets — because that is what mail.agent-inbox-message@1 says and what the
+     * reply builder brackets once. A header is a stranger's text, so a value is taken only when it looks like an
+     * address-less id: no whitespace other than the separators, no angle brackets inside, bounded length.
+     */
+    function threadHeaders(message) {
+        const all = message.headers || [];
+        const valueOf = (name) => {
+            const found = all.find((h) => String(h && h.name || '').toLowerCase() === name);
+            return found ? String(found.value || '') : '';
+        };
+        const idOf = (raw) => {
+            const m = /<([^<>\s]{1,995})>/.exec(String(raw || ''));
+            const value = m ? m[1] : null;
+            return value && value.length <= 995 ? value : null;
+        };
+        const refs = [...String(valueOf('references')).matchAll(/<([^<>\s]{1,995})>/g)].map((m) => m[1]).slice(0, 100);
+        return {
+            messageId: idOf(valueOf('message-id')),
+            inReplyTo: idOf(valueOf('in-reply-to')),
+            references: refs,
+        };
+    }
+
+    /**
      * The newest messages of a mailbox. Metadata only: the id, the sender, the subject and when it arrived. There
      * is no preview and no body: the body is read once, by the code extractor, and forgotten.
      *
@@ -173,6 +198,9 @@ function createStalwartClient({ config, fetchImpl = globalThis.fetch, log = cons
                 subject: m.subject || null,
                 receivedAt: m.receivedAt || null,
                 spam: Boolean(m.keywords && m.keywords.$junk),
+                // The thread a reply belongs in: the Message-ID this letter answers and the chain before it. Bare
+                // (no angle brackets), because that is what the reply contract says and what buildReply brackets.
+                ...(wanted ? threadHeaders(m) : {}),
             });
             if (messages.length >= perPage) break;
         }
@@ -350,7 +378,7 @@ function createStalwartClient({ config, fetchImpl = globalThis.fetch, log = cons
         if (!accountId) return null;
         const got = await one('Email/get', {
             accountId, ids: [id],
-            properties: ['id', 'from', 'to', 'cc', 'subject', 'receivedAt', 'sentAt', 'keywords', 'textBody', 'htmlBody', 'attachments', 'bodyValues'],
+            properties: ['id', 'from', 'to', 'cc', 'subject', 'receivedAt', 'sentAt', 'keywords', 'textBody', 'htmlBody', 'attachments', 'bodyValues', 'headers', 'hasAttachment'],
             fetchTextBodyValues: true, fetchHTMLBodyValues: true, maxBodyValueBytes: 1024 * 1024,
         }, 'e');
         const m = (got.list || [])[0];
@@ -366,10 +394,27 @@ function createStalwartClient({ config, fetchImpl = globalThis.fetch, log = cons
             subject: m.subject || null,
             date: m.sentAt || m.receivedAt || null,
             unread: !(m.keywords && m.keywords.$seen),
+            spam: Boolean(m.keywords && m.keywords.$junk),
+            // The envelope recipient Stalwart stamped at delivery, and the thread this letter belongs to.
+            deliveredTo: stampedRecipient(m),
+            threadHeaders: threadHeaders(m),
             text: join(m.textBody, false),
             html: join(m.htmlBody, true),
             attachments: (m.attachments || []).filter((a) => a && a.blobId).map((a) => ({ part: String(a.partId || a.blobId), blobId: a.blobId, name: a.name || null, type: a.type || null, size: Number(a.size) || 0 })),
         };
+    }
+
+    /**
+     * One message, only when the mail server stamped it for `recipient`: the read an agent does of a letter to its
+     * own address. A message id alone is never enough — the person's mailbox holds their masks' and their other
+     * agents' mail too, so the stamp is the only thing that says whose this one is. Null otherwise.
+     */
+    async function readForRecipient({ mailboxAddress, recipient, id }) {
+        const wanted = String(recipient || '').trim().toLowerCase();
+        if (!wanted) return null;
+        const message = await readMessage({ mailboxAddress, id });
+        if (!message || message.deliveredTo !== wanted) return null;
+        return message;
     }
 
     /** An attachment's bytes, when that part belongs to that message in that mailbox; null otherwise. */
@@ -415,6 +460,7 @@ function createStalwartClient({ config, fetchImpl = globalThis.fetch, log = cons
         listMessages,
         readMessages,
         readMessage,
+        readForRecipient,
         readAttachment,
         setSeen,
         trashMessage,

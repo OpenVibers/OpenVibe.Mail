@@ -67,6 +67,11 @@ token must name the person it acts for (`on_behalf_of`) and carry `mail.addresse
 | `POST` | `/agent-inboxes` | a person; `{ agent_id }` |
 | `GET` | `/agent-inboxes` | a person |
 | `GET` | `/agent-inboxes/:id/messages` | the owner |
+| `GET` | `/agent-inboxes/:id/answering` | the owner; the switch, off by default (`mail.inbox-answering@1`) |
+| `PUT` | `/agent-inboxes/:id/answering` | the owner; `{ enabled }` turns an agent's answering on or off |
+| `GET` | `/me/mail/blocks` | the person's blocked senders |
+| `POST` | `/me/mail/blocks` | the person; `{ address }` |
+| `DELETE` | `/me/mail/blocks/:address` | the person's own block |
 
 Somebody else's mask, burner or inbox answers **404**, never 403: the answer must not say it exists. The messages
 API returns an array of `{ id, from, subject, received_at }` and nothing else: no preview, no body, no HTML. The
@@ -87,11 +92,39 @@ The outbox (`event_outbox`) publishes, through OpenVibe.Events when configured:
 - `mail.mask.created` — the mask exists;
 - `mail.received` — metadata only: the address, the sender, the message id and the time. **No subject, no body,
   no code.**
+- `mail.agent_inbox.received` — an agent's address whose answering the person turned ON. The inbox and the agent,
+  the owner, the message id, the sender, the subject, and a plain-text excerpt of **at most 4000 characters**.
+  Never the HTML, never an attachment, and nothing at all for a message the mail server marked as spam or a sender
+  on the person's block list.
+
+## An agent answers the mail sent to its own address (HO6)
+
+An agent's inbox is an address, not an invitation: answering is a **switch, off by default**, that the person turns
+on for one agent. While it is on, the due poll (`server/jobs/agent-mail.js`) reads the newest messages of the
+person's mailbox as that inbox, and for each letter not seen before publishes `mail.agent_inbox.received` once —
+the row that says the letter is the agent's and the event commit in one transaction, so an overlapping poll or a
+restart never announces it twice. Spam, a blocked sender and the inbox's own address start nothing.
+
+The agent's system then acts on the event. It reads the whole letter in plain text through `mail.agent.read`
+(loopback, first-party service token, the person named in `X-OV-Subject`), and answers through `mail.agent.reply`:
+the reply is sent **from the agent's address**, to the sender of the letter and to nobody else, plain text, with
+`In-Reply-To`/`References` read from the letter itself. Every send is recorded in `mail_sent_mail` with its outcome.
+
+**Outbound is not ours yet.** A reply goes only to one of the owner's own `openvibe.email` addresses — their
+mailbox, a mask, a burner — which is local delivery on our own server, no packet off the host. Sending to anyone
+else is plan M2 and waits on the owner (a separate mail IPv4, its PTR record, Workers Paid for the relay), so it is
+behind a switch that is **off by default**: `MAIL_OUTBOUND=on` is the only way on. With it off, `routeFor` answers
+before any connection is opened, `POST …/reply` answers `409 mail.outbound_closed` with the plain sentence "OpenVibe
+Mail cannot send outside OpenVibe yet: the reply waits here", and the agent's system turns that into the person's
+send approval: the reply stays pending, nothing is sent and nothing is lost. `GET /internal/mail/outbound` says
+whether the switch is on, so the approval card can say so itself.
 
 ## Contracts
 
-`mail.mask@1`, `mail.burner@1`, `mail.agent-inbox@1` and `mail.message-summary@1` are in
-[OpenVibe.Contracts](https://github.com/OpenVibers/OpenVibe.Contracts) v0.329.0, which this service pins. The
+`mail.mask@1`, `mail.burner@1`, `mail.agent-inbox@1`, `mail.message-summary@1`, `mail.agent-inbox-message@1`,
+`mail.agent-reply-request@1`, `mail.agent-reply-result@1`, `mail.inbox-answering@1` and
+`mail.agent_inbox.received@1` are in
+[OpenVibe.Contracts](https://github.com/OpenVibers/OpenVibe.Contracts) v0.342.0, which this service pins. The
 `/me/mail` listing is a projection above them (state, expiry, counts) — the Contracts resources do not grow extra
 fields, and no Contracts release is made from this repository.
 

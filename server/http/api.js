@@ -34,6 +34,10 @@ const masks = require('../domain/masks');
 const burners = require('../domain/burners');
 const agentInboxes = require('../domain/agent-inboxes');
 const messages = require('../domain/messages');
+const answering = require('../domain/agent-answering');
+
+/** Whether this inbox answers mail (track HO6): off unless the person turned it on. */
+const agentInboxesAnswering = (db, owner, inbox) => answering.getAnswering({ db, owner, inbox });
 
 function createApi({ db, config, stalwart, events, principal, log = console }) {
     const router = express.Router();
@@ -81,7 +85,12 @@ function createApi({ db, config, stalwart, events, principal, log = console }) {
             ...inboxes.map((i) => i.address),
         ];
         const seen = await messages.countsByAddress({ db, addresses });
+        const answeringByInbox = new Map(
+            (await Promise.all(inboxes.map((inbox) => agentInboxesAnswering(db, owner, inbox))))
+                .map((state) => [state.address, state.enabled]),
+        );
         const countOf = (address) => seen.get(address) || 0;
+
         const now = () => Date.now();
 
         const maskItems = maskRows.map((row) => ({
@@ -104,6 +113,7 @@ function createApi({ db, config, stalwart, events, principal, log = console }) {
             address: inbox.address,
             purpose: null,
             state: 'active',
+            answering: answeringByInbox.get(inbox.address) || false,
             counts: { messages: countOf(inbox.address) },
         }));
 

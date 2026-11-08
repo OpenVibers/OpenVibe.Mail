@@ -3,11 +3,11 @@
   "stage": "alpha",
   "code": true,
   "wave": "M1",
-  "plan": "OpenVibe Seven Domains Plan (2026-11-07) §8, M1: Stalwart receiving, masks, burners and agent inboxes",
+  "plan": "OpenVibe Seven Domains Plan (2026-11-07) \u00a78, M1: Stalwart receiving, masks, burners and agent inboxes; HO6 (channels): an agent answers the mail sent to its own address",
   "runtime": "node 22, express, PostgreSQL 18 (openvibe-sdk/db), Stalwart Community 1.0.3 (AGPL-3.0-only), local filesystem blobs (S3 optional)",
   "port": 5250,
   "domain": "openvibe.email; receive-only MX. The API is public through nginx (deploy/nginx/openvibe.email.conf); no UI yet.",
-  "contracts": "openvibe-contracts v0.338.0",
+  "contracts": "openvibe-contracts v0.342.0",
   "sdk": "openvibe-sdk v0.97.1",
   "shared": "openvibe-shared v4.148.0",
   "contractsProposed": [],
@@ -25,9 +25,10 @@
   "capabilitiesRegistered": false,
   "eventsProduced": [
     "mail.mask.created",
-    "mail.received"
+    "mail.received",
+    "mail.agent_inbox.received"
   ],
-  "eventsPayload": "metadata only; mail.received never carries a subject, body or code",
+  "eventsPayload": "mail.mask.created and mail.received are metadata only: neither carries a subject, body or code. mail.agent_inbox.received (HO6) carries the subject and a plain-text excerpt of at most 4000 characters for an inbox whose answering switch the person turned on; never the HTML, never an attachment, and nothing at all for spam or a blocked sender",
   "limits": {
     "masksPerPerson": 20,
     "liveBurnersPerPerson": 5,
@@ -41,7 +42,8 @@
     "message bodies are never logged, stored by this service, served as HTML or put in an event; the messages API returns metadata only",
     "a mask never forwards outside OpenVibe",
     "the code extractor is the only reader of a body and drops it immediately",
-    "an expired burner's mail and account are deleted by a due-based purge job; a failure keeps the row for the next run"
+    "an expired burner's mail and account are deleted by a due-based purge job; a failure keeps the row for the next run",
+    "an agent's reply is recorded with its outcome (mail_sent_mail) and carries no attachment; a message body reaches an event only as the excerpt of an inbox whose answering is on"
   ],
   "tests": {
     "unit": "node test/run.js (PGlite, in-process Network and mail server)",
@@ -72,5 +74,14 @@
     "cors": "Bearer from any first-party origin in the Contracts manifests; cookie writes only same-origin on openvibe.email",
     "trustProxy": 2
   },
-  "updated": "2026-11-08"
+  "updated": "2026-11-08",
+  "agentMail": {
+    "switch": "off by default, per agent; the poll walks only inboxes whose switch is on",
+    "poll": "due-based, under its own lease in mail_settings; a message is announced once (the row and the event commit together)",
+    "skips": "a message the mail server marked as spam, a sender on the person's block list, and the inbox's own address",
+    "read": "GET /internal/mail/agents/:agent_id/messages/:message_id (mail.agent.read), loopback only",
+    "reply": "POST /internal/mail/agents/:agent_id/reply (mail.agent.reply), from the inbox address, to the sender only, plain text",
+    "delivery": "a reply to the owner's own openvibe.email addresses (mailbox, masks, burners) is handed to the mail server over loopback SMTP. Sending outside OpenVibe is not ours yet (plan M2, waiting on the owner): MAIL_OUTBOUND=on is the only way on and it is OFF by default, so with it off such a reply opens no connection and answers 409 mail.outbound_closed, which the agent's system turns into the person's send approval (the reply waits, nothing is sent, nothing is lost)",
+    "outbound": "GET /internal/mail/outbound says whether Mail may send outside OpenVibe, so an approval card can say plainly that the reply will wait"
+  }
 }
