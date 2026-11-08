@@ -13,6 +13,8 @@
 const contracts = require('openvibe-contracts');
 
 const HOST_RE = /^(?=.{1,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
+// Firefox gives every install of an extension a different origin, so the wildcard is a pattern, not a list.
+const MOZ_EXTENSION_RE = /^moz-extension:\/\/[0-9a-f-]{36}$/;
 let cached = null;
 
 /** The https origins of every first-party domain the installed Contracts manifest names. */
@@ -44,7 +46,7 @@ function originOf(url) {
  * opts.baseUrl       this site's origin, always allowed (the same-origin API calls need no CORS, but a page that
  *                    names its own origin explicitly is still first-party)
  */
-function createCors({ extraOrigins = [], baseUrl = null } = {}) {
+function createCors({ extraOrigins = [], baseUrl = null, extensionOrigins = [] } = {}) {
     const allowed = new Set(manifestOrigins());
     const own = originOf(baseUrl);
     if (own) allowed.add(own);
@@ -52,10 +54,16 @@ function createCors({ extraOrigins = [], baseUrl = null } = {}) {
         const origin = originOf(value);
         if (origin) allowed.add(origin);
     }
+    // The Companion (the browser extension) calls this API from its own origin: an exact
+    // chrome-extension://<id> or the literal pattern moz-extension://* for Firefox. It is allowed
+    // to read the person's masks with their own token, and nothing else is opened to it.
+    const extensions = new Set((extensionOrigins || []).filter((v) => v && v !== 'moz-extension://*'));
+    const anyMoz = (extensionOrigins || []).includes('moz-extension://*');
 
     return function cors(req, res, next) {
         const origin = req.get('origin');
-        if (origin && allowed.has(origin)) {
+        const fromExtension = Boolean(origin) && (extensions.has(origin) || (anyMoz && MOZ_EXTENSION_RE.test(origin)));
+        if (origin && (allowed.has(origin) || fromExtension)) {
             res.set('Access-Control-Allow-Origin', origin);
             res.vary('Origin');
             res.set('Access-Control-Allow-Headers', 'Authorization, Content-Type, traceparent, X-OpenVibe-Request-Id');
