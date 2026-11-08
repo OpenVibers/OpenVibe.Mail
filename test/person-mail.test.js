@@ -27,6 +27,10 @@ test('person send checks trust, recipient cap and concurrent daily allowance', a
     const alice = s.network.addUser('alice', { ageDays: 3 });
     const made = await s.post('/api/v1/me/mail/person-addresses', { as: alice, json: { name: 'alice', kind: 'name' } });
     assert.equal(made.status, 201, made.text);
+    const appToken = s.network.signJwt({ iss: s.network.url, sub: 'svc:mail-test', actor_type: 'service',
+        aud: ['openvibe.mail'], cap: ['mail.addresses.write'], on_behalf_of: alice.subject,
+        iat: Math.floor(Date.now()/1000), exp: Math.floor(Date.now()/1000)+300, jti: 'person-mail-app-1' });
+    assert.equal((await s.post('/api/v1/me/mail/send', { bearer: appToken, json: { from: made.body.address, to: ['friend@openvibe.email'], subject: 'Hello', body: 'Hi' } })).status, 403);
     const send = (to) => s.post('/api/v1/me/mail/send', { as: alice, json: { from: made.body.address, to, subject: 'Hello', body: 'One message.' } });
     assert.equal((await send(Array.from({ length: 11 }, (_, i) => `r${i}@openvibe.email`))).status, 422);
     assert.equal((await send(Array.from({ length: 10 }, (_, i) => `a${i}@openvibe.email`))).status, 200);

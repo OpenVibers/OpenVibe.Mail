@@ -11,6 +11,8 @@ function mountPersonMail(router, { db, config, stalwart, smtp, principal, wrap, 
     const write = principal.requirePerson(principal.CAPABILITIES.write);
     const policy = createNetworkPolicy(config, fetchImpl);
     const noStore = (res) => res.set('Cache-Control', 'private, no-store');
+    const humanOnly = (req, res, next) => req.principal?.kind === 'user' ? next()
+        : fail(req, res, 403, 'mail.person_required', 'Sign in as the account owner to send or forward mail.');
 
     router.get('/api/v1/me/mail/person-addresses', read, wrap(async (req, res) => {
         const rows = await db.many(sql`SELECT address,kind,enabled,created_at FROM mail_person_addresses WHERE owner_subject=${ownerOf(req)} ORDER BY created_at`);
@@ -40,7 +42,7 @@ function mountPersonMail(router, { db, config, stalwart, smtp, principal, wrap, 
         } catch (err) { return fail(req, res, 422, 'mail.custom_domain.invalid', err.message); }
     }));
 
-    router.post('/api/v1/me/mail/send', write, wrap(async (req, res) => {
+    router.post('/api/v1/me/mail/send', write, humanOnly, wrap(async (req, res) => {
         const result = await addresses.send({ db, config, owner: ownerOf(req), from: req.body?.from,
             recipients: req.body?.to, subject: req.body?.subject, body: req.body?.body, policy, smtp, fetchImpl });
         if (result.code) return fail(req, res, result.status, result.code, result.detail);
@@ -51,13 +53,13 @@ function mountPersonMail(router, { db, config, stalwart, smtp, principal, wrap, 
         const rows = await db.many(sql`SELECT id,source_address,target_address,enabled,created_at FROM mail_forward_rules WHERE owner_subject=${ownerOf(req)} ORDER BY created_at`);
         return noStore(res).json({ forwards: rows });
     }));
-    router.post('/api/v1/me/mail/forwards', write, wrap(async (req, res) => {
+    router.post('/api/v1/me/mail/forwards', write, humanOnly, wrap(async (req, res) => {
         try {
             const id = await forwarding.add({ db, owner: ownerOf(req), source: req.body?.source, target: req.body?.target, policy });
             return noStore(res).status(201).json({ id });
         } catch (err) { return fail(req, res, 422, 'mail.forward.invalid', err.message); }
     }));
-    router.delete('/api/v1/me/mail/forwards/:id', write, wrap(async (req, res) => {
+    router.delete('/api/v1/me/mail/forwards/:id', write, humanOnly, wrap(async (req, res) => {
         const row = await db.maybe(sql`DELETE FROM mail_forward_rules WHERE id=${req.params.id} AND owner_subject=${ownerOf(req)} RETURNING id`);
         if (!row) return fail(req, res, 404, 'mail.forward.not_found', 'That forwarding rule is not yours.');
         return noStore(res).status(204).end();
