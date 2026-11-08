@@ -167,7 +167,7 @@ AGPL-3.0-only, matching Stalwart Community. OpenVibe.Mail ships configuration an
 Stalwart.
 
 <!-- versions:start -->
-- openvibe-contracts: v0.329.0
+- openvibe-contracts: v0.338.0
 - openvibe-sdk: v0.97.1
 - openvibe-shared: v4.142.0
 <!-- versions:end -->
