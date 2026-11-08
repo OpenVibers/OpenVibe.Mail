@@ -207,3 +207,7 @@ main[data-mail-settings] .ib-ai-settings, main[data-mail-settings] .ib-newmask, 
 }
 
 .ib-compose:not([open]), .ib-preview:not([open]) { display:none; }
+
+/* A link drawn as a button (Settings) reads as the button it is: no underline, centred like the others. */
+a.ib-btn { display: inline-flex; align-items: center; justify-content: center; text-decoration: none; }
+.ib-search-help { color: var(--ib-faint, var(--ib-muted)); }

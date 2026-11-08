@@ -361,7 +361,7 @@
       if (m.starred) sub.appendChild(el('span', '', ' · ★'));
       if (m.labels && m.labels.length) sub.appendChild(el('span', '', ' · ' + m.labels.join(', ')));
       b.appendChild(sub);
-      if (current === 'all' && m.to) b.appendChild(el('span', 'ib-row-to', 'to ' + (Array.isArray(m.to) ? m.to[0] : m.to)));
+      if (current === 'all' && m.to) { var toWho = receivedAs(Array.isArray(m.to) ? m.to[0] : m.to); if (toWho) b.appendChild(el('span', 'ib-row-to', 'to ' + toWho)); }
       b.addEventListener('click', function () { if (!suppressOpen) openMessage(m.id, false); });
       var swipeStart, suppressOpen = false;
       b.addEventListener('touchstart', function (e) { suppressOpen = false; swipeStart = { x:e.changedTouches[0].clientX,y:e.changedTouches[0].clientY }; }, { passive:true });
@@ -499,6 +499,16 @@
 
   var statusBar, pendingLoad = false, outboxRows = [], outboxCursor = null;
   function notice(text) { if (statusBar) statusBar.textContent = text; }
+  /** Which of the person's addresses received a message, in words: a mask or alias by its label; the person's own
+   *  mailbox (a random id, the default) needs no line. */
+  function receivedAs(addr) {
+    var a = String(addr || '').toLowerCase();
+    var hit = null;
+    for (var i = 0; i < addresses.length; i++) if (String(addresses[i].address || '').toLowerCase() === a) { hit = addresses[i]; break; }
+    if (!hit) return addr;
+    if (hit.kind === 'mailbox') return null;
+    return hit.label ? hit.label + ' (' + hit.address + ')' : hit.address;
+  }
   function compose(payload,original,mode) { window.MailCompose.open({ api:api,addresses:workspace.addresses, payload:payload,original:original,mode:mode,onQueued:queued }); }
   function queued(result) {
     notice('Queued for ' + new Date(result.send_at).toLocaleString() + '.');
@@ -514,9 +524,9 @@
     var toolbar = el('header','ib-toolbar');
     var title = el('h1','','Mail'); toolbar.appendChild(title);
     var newMessage = el('button','ib-btn','Compose'); newMessage.onclick = function () { compose(); }; toolbar.appendChild(newMessage);
-    var settings = el('a','ib-btn is-quiet','Settings'); settings.href = '/inbox/settings'; toolbar.appendChild(settings); var helpButton = el('button','ib-btn is-quiet','?'); helpButton.setAttribute('aria-label','Keyboard shortcuts and gestures'); helpButton.onclick = function () { notice('c compose · / search · r reply · e archive · j/k next/previous · Esc back · Ctrl/⌘ Enter send. Swipe a message to archive.'); }; toolbar.appendChild(helpButton);
+    var settings = el('a','ib-btn is-quiet','Settings'); settings.href = '/inbox/settings'; toolbar.appendChild(settings); var helpButton = el('button','ib-btn is-quiet','?'); helpButton.setAttribute('aria-label','Keyboard shortcuts and gestures'); helpButton.onclick = function () { notice('Search: from: to: subject: "exact words" has:attachment after:2026-01-01 before:2026-12-31 (UTC). Keys: c compose · / search · r reply · e archive · j/k next/previous · Esc back · Ctrl/⌘ Enter send. Swipe a message to archive.'); }; toolbar.appendChild(helpButton);
     var form = el('form','ib-search'); var searchInput = el('input','ib-input'); searchInput.type = 'search'; searchInput.placeholder = 'Search mail'; searchInput.setAttribute('aria-label','Search mail');
-    var help = el('p','ib-search-help','from: to: subject: "words" has:attachment after:2026-01-01 before:2026-12-31 · dates use UTC'); help.id = 'search-help'; searchInput.setAttribute('aria-describedby',help.id);
+    var help = el('p','ib-search-help','Try from:anna, has:attachment or after:2026-01-01 (the ? button lists them all)'); help.id = 'search-help'; searchInput.setAttribute('aria-describedby',help.id);
     var go = el('button','ib-btn is-quiet','Search'); go.type = 'submit'; form.appendChild(searchInput); form.appendChild(go);
     form.onsubmit = function (e) { e.preventDefault(); search = searchInput.value; folder = search ? 'all' : 'inbox'; cursor = null; paintFolders(); loadList(); };
     toolbar.appendChild(form); toolbar.appendChild(help);
