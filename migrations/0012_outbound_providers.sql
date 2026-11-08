@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS mail_outbound_usage (
     month date NOT NULL,
     attempts integer NOT NULL DEFAULT 0 CHECK (attempts >= 0),
     sent integer NOT NULL DEFAULT 0 CHECK (sent >= 0),
+    spend numeric(12,6) NOT NULL DEFAULT 0 CHECK (spend >= 0),
     PRIMARY KEY (provider_id, month)
 );
 

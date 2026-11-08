@@ -29,6 +29,15 @@ test('SES SNS signatures require the configured topic and a trusted SNS certific
     assert.equal(await webhooks.verifySes('', { ...payload, SigningCertURL: 'https://example.net/cert.pem' }, fetchImpl, payload.TopicArn), false);
 });
 
+test('provider webhook authentication uses documented signatures or shared credentials', async () => {
+    const rawBody = Buffer.from('{"event":"bounce"}');
+    const signature = crypto.createHmac('sha256', 'mailersend-hook').update(rawBody).digest('hex');
+    assert.equal(await webhooks.verify({ adapter: 'mailersend', secret: 'mailersend-hook', payload: {}, rawBody, headers: { signature } }), true);
+    assert.equal(await webhooks.verify({ adapter: 'mailjet', secret: 'user:pass', payload: {}, rawBody, headers: { authorization: `Basic ${Buffer.from('user:pass').toString('base64')}` } }), true);
+    assert.equal(await webhooks.verify({ adapter: 'brevo', secret: 'owner-shared-secret', payload: {}, rawBody, headers: { 'x-mail-webhook-secret': 'owner-shared-secret' } }), true);
+    assert.equal(await webhooks.verify({ adapter: 'brevo', secret: 'owner-shared-secret', payload: {}, rawBody, headers: {} }), false);
+});
+
 test('verified provider webhook events are idempotent, update domain health and suppress shared hard bounces', async (t) => {
     const s = await boot({ env: { MAIL_PROVIDER_KEK: 'test-only-key', MAIL_OUTBOUND: 'on' } });
     t.after(() => s.close());

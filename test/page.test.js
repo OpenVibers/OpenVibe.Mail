@@ -51,6 +51,11 @@ test('the page\'s files are served by content hash, and Shared\'s from /shared',
     assert.strictEqual(inboxJs.status, 200);
     assert.match(inboxJs.text, /Connected mailboxes/, 'Inbox AI shows the connected mailboxes');
     assert.match(inboxJs.text, /imap-mailboxes/);
+    const providerJs = await s.get(asset('js/mail-providers.js'));
+    assert.strictEqual(providerJs.status, 200);
+    for (const marker of ['free_daily', 'price_per_thousand', 'monthly_budget', 'rate_limit_per_minute', 'enabled_kinds', 'lookup_count', 'bounce_rate', 'spend_this_month']) {
+        assert.ok(providerJs.text.includes(marker), marker);
+    }
     const navbar = await s.get('/shared/navbar.js');
     assert.strictEqual(navbar.status, 200);
     const missing = await s.get('/js/nope.js');

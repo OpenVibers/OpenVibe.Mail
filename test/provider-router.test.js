@@ -11,6 +11,7 @@ test('outbound provider settings are hidden from non-owners and secrets are writ
     const user = s.network.addUser('reader');
     const owner = s.network.addUser('owner', { role: 'owner' });
     assert.equal((await s.get('/api/v1/admin/mail/providers', { as: user })).status, 404);
+    assert.equal((await s.get('/api/v1/admin/mail/domains?domain=example.com', { as: user })).status, 404);
     const saved = await s.put('/api/v1/admin/mail/providers/smtp_primary', { as: owner, json: {
         name: 'Primary SMTP', host: 'smtp.example.net', port: 587, username: 'mailer', password: 'never-return-this',
         enabled: true, free_monthly: 1000, price_per_thousand: 0.1, monthly_budget: 5,
@@ -73,6 +74,25 @@ test('transient failures open the provider circuit and allow one half-open probe
     const reopened = new Date(start.getTime() + 5 * 60_000 + 1);
     assert.ok(await providers.choose({ db: s.db, config: s.config, now: reopened }));
     assert.equal(await providers.choose({ db: s.db, config: s.config, now: reopened }), null, 'only one half-open probe may run at once');
+});
+
+test('owner provider metrics report successful sends, remaining free volume and actual spend', async (t) => {
+    const s = await boot({ env: { MAIL_PROVIDER_KEK: 'test-only-key', MAIL_OUTBOUND: 'on' } });
+    t.after(() => s.close());
+    await providers.save({ db: s.db, config: s.config, input: { id: 'smtp_metrics', name: 'Metrics', host: 'smtp.example.net', password: 'p', enabled: true, free_daily: 2, free_monthly: 1, price_per_thousand: 10, monthly_budget: 1 } });
+    for (let index = 0; index < 2; index += 1) {
+        const route = await providers.choose({ db: s.db, config: s.config });
+        const cost = route.reservation.free ? 0 : Number(route.price_per_thousand) / 1000;
+        await providers.recordOutcome({ db: s.db, providerId: route.providerId, to: 'person@gmail.com', ok: true, spend: cost });
+    }
+    await s.db.exec("INSERT INTO mail_outbound_deliverability(provider_id,recipient_domain,delivered,bounced,complaints) VALUES ('smtp_metrics','gmail.com',9,1,0)");
+    const provider = providers.publicProvider((await providers.list(s.db))[0]);
+    assert.equal(provider.sent_today, 2);
+    assert.equal(provider.sent_this_month, 2);
+    assert.equal(provider.free_left_today, 0);
+    assert.equal(provider.free_left_this_month, 0);
+    assert.equal(provider.spend_this_month, 0.01);
+    assert.equal(provider.bounce_rate, 0.1);
 });
 
 test('paid provider cannot be enabled without a monthly budget cap', () => {

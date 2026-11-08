@@ -28,16 +28,16 @@ function open(row, key) {
 function publicProvider(row) {
     return {
         id: row.id, adapter: row.adapter || 'smtp', settings: row.settings || {}, name: row.name, host: row.host, port: row.port, username: row.username || null,
-        has_credential: Boolean(row.credential_ciphertext), secure: row.secure, starttls: row.starttls,
+        has_credential: Boolean(row.credential_ciphertext), has_webhook_secret: Boolean(row.webhook_secret_ciphertext), secure: row.secure, starttls: row.starttls,
         enabled: row.enabled, priority: row.priority, free_monthly: row.free_monthly,
         price_per_thousand: Number(row.price_per_thousand), monthly_budget: Number(row.monthly_budget),
         free_daily: Number(row.free_daily || 0), rate_limit_per_minute: Number(row.rate_limit_per_minute || 60),
         enabled_kinds: row.enabled_kinds || ['system','person'], sent_today: Number(row.sent_today || 0),
         sent_this_month: Number(row.sent_this_month || 0), attempts_this_month: Number(row.attempts_this_month || 0),
-        free_left_today: Math.max(0, Number(row.free_daily || 0) - Number(row.sent_today || 0)),
+        free_left_today: Number(row.free_daily || 0) ? Math.max(0, Number(row.free_daily) - Number(row.sent_today || 0)) : null,
         free_left_this_month: Math.max(0, Number(row.free_monthly || 0) - Number(row.sent_this_month || 0)),
         spend_this_month: Number(row.spend_this_month || 0), bounce_rate: Number(row.bounce_rate || 0), complaint_rate: Number(row.complaint_rate || 0),
-        health: row.health_open_until && new Date(row.health_open_until) > new Date() ? 'open' : 'healthy',
+        health: row.health_open_until && new Date(row.health_open_until) > new Date() ? 'open' : row.last_health === 'degraded' ? 'degraded' : 'healthy',
     };
 }
 
@@ -80,7 +80,7 @@ function validate(input) {
 async function list(db) {
     return db.many(sql`SELECT p.*, COALESCE(u.attempts, 0) AS attempts_this_month, COALESCE(u.sent, 0) AS sent_this_month,
         COALESCE(d.attempts, 0) AS attempts_today, COALESCE(d.sent, 0) AS sent_today, COALESCE(p.health_failures,0) AS current_health_failures,
-        COALESCE(GREATEST(u.sent-p.free_monthly,0)*p.price_per_thousand/1000,0)::numeric(12,4) AS spend_this_month,
+        COALESCE(u.spend,0)::numeric(12,6) AS spend_this_month,
         COALESCE(ds.bounced,0)::numeric / GREATEST(1,COALESCE(ds.delivered,0)+COALESCE(ds.bounced,0)) AS bounce_rate,
         COALESCE(ds.complaints,0)::numeric / GREATEST(1,COALESCE(ds.delivered,0)+COALESCE(ds.bounced,0)) AS complaint_rate
         FROM mail_outbound_providers p LEFT JOIN mail_outbound_usage u ON u.provider_id = p.id AND u.month = date_trunc('month', now())::date
@@ -205,14 +205,15 @@ async function choose({ db, config, now = new Date(), fromDomain = null, toDomai
     let credential = open(row, keyFrom(config));
     try { credential = JSON.parse(credential); } catch { /* token and SMTP credentials stay strings */ }
     return { kind: 'relay', adapter: row.adapter || 'smtp', settings: row.settings || {}, host: row.host, port: row.port, secure: row.secure, starttls: row.starttls,
+        price_per_thousand: Number(row.price_per_thousand || 0),
         user: row.username, password: credential, timeoutMs: 20000, providerId: row.id, reservation: row.reservation };
 }
 
-async function recordOutcome({ db, providerId, to, ok, transient = false, now = new Date() }) {
+async function recordOutcome({ db, providerId, to, ok, transient = false, spend = 0, now = new Date() }) {
     const month = monthDay(now), day = dayKey(now);
     await db.tx(async (t) => {
         if (ok) {
-            await t.exec(sql`UPDATE mail_outbound_usage SET sent=sent+1 WHERE provider_id=${providerId} AND month=${month}`);
+            await t.exec(sql`UPDATE mail_outbound_usage SET sent=sent+1,spend=spend+${Math.max(0,Number(spend)||0)} WHERE provider_id=${providerId} AND month=${month}`);
             await t.exec(sql`UPDATE mail_outbound_daily_usage SET sent=sent+1 WHERE provider_id=${providerId} AND day=${day}`);
             await t.exec(sql`UPDATE mail_outbound_providers SET health_failures=0,health_open_until=NULL,health_probe_until=NULL,last_health_at=${now.toISOString()},last_health='healthy' WHERE id=${providerId}`);
         } else if (transient) {
@@ -236,7 +237,8 @@ async function sendWithFailover({ db, config, from, to, message, kind = 'person'
             ? await (smtp || require('../stalwart/smtp')).sendMessage(route, { from, to, message })
             : await adapters.send({ route, from, to, message, fetchImpl });
         if (route.adapter === 'smtp' && result && !result.ok) result = { ...result, transient: Number(result.code) >= 400 && Number(result.code) < 500, uncertain: !Number(result.code) };
-        await recordOutcome({ db, providerId: route.providerId, to, ok: Boolean(result && result.ok), transient: Boolean(result && result.transient), now });
+        const spend = route.reservation && route.reservation.free ? 0 : Number(route.price_per_thousand || 0) / 1000;
+        await recordOutcome({ db, providerId: route.providerId, to, ok: Boolean(result && result.ok), transient: Boolean(result && result.transient), spend, now });
         if (result && result.ok) return { ...result, route };
         if (!result || !result.transient || result.uncertain) return { ...(result || {}), ok: false, route };
         excluded.push(route.providerId);

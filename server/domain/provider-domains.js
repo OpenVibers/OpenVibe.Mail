@@ -35,23 +35,24 @@ async function save({ db, providerId, input }) {
 }
 
 async function lookupCount(domain, resolveTxt = (host) => dns.resolveTxt(host), includes = []) {
-    const visited = new Set();
     let count = 0;
     let uncertain = false;
-    async function visit(host) {
-        if (visited.has(host) || visited.size > 30) return;
-        visited.add(host);
+    let visits = 0;
+    async function visit(host, ancestors = new Set()) {
+        if (ancestors.has(host)) { uncertain = true; return; }
+        if (++visits > 100) { uncertain = true; return; }
         let records;
         try { records = await resolveTxt(host); } catch { uncertain = true; return; }
         const spf = records.map((parts) => Array.isArray(parts) ? parts.join('') : String(parts)).find((record) => /^v=spf1(?:\s|$)/i.test(record));
         if (!spf) { uncertain = true; return; }
+        const nestedAncestors = new Set([...ancestors, host]);
         for (const mechanism of spf.split(/\s+/).slice(1)) {
             const bare = mechanism.replace(/^[+?~-]/, '');
             const include = /^include:(.+)$/i.exec(bare);
-            if (include) { count += 1; await visit(include[1]); }
-            else if (/^(?:a(?:$|[:/])|mx(?:$|[:/])|exists:|redirect=)/i.test(bare)) {
+            if (include) { count += 1; await visit(include[1], nestedAncestors); }
+            else if (/^(?:a(?:$|[:/])|mx(?:$|[:/])|ptr(?:$|[:/])|exists:|redirect=)/i.test(bare)) {
                 count += 1;
-                if (/^redirect=/i.test(bare)) await visit(bare.slice(9));
+                if (/^redirect=/i.test(bare)) await visit(bare.slice(9), nestedAncestors);
             }
         }
     }
@@ -66,7 +67,7 @@ async function list({ db, domain: inputDomain, resolveTxt }) {
         FROM mail_outbound_domains d JOIN mail_outbound_providers p ON p.id=d.provider_id
         WHERE d.domain=${domain} AND p.enabled=true ORDER BY p.priority,p.id`);
     const includes = [...new Set(rows.map((row) => row.spf_include).filter(Boolean))];
-    const spf = `v=spf1 ${includes.map((item) => `include:${item}`).join(' ')} -all`;
+    const spf = ['v=spf1', ...includes.map((item) => `include:${item}`), '-all'].join(' ');
     const count = await lookupCount(domain, resolveTxt, includes);
     return { domain, records: rows, spf, lookup_count: count.count, lookup_count_uncertain: count.uncertain, warn_before_limit: count.uncertain || count.count >= 8, lookup_limit: 10 };
 }

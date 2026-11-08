@@ -73,12 +73,9 @@ async function verify({ adapter, secret, payload, rawBody, headers = {}, fetchIm
     if (adapter === 'mailersend') return verifyHmac(secret, raw, headers.signature);
     const auth = String(headers.authorization || '');
     if (auth.startsWith('Basic ') && equal(auth, `Basic ${Buffer.from(String(secret)).toString('base64')}`)) return true;
-    // Brevo exposes unsigned JSON notifications; use an owner-configured shared header/token.
-    // https://developers.brevo.com/docs/transactional-webhooks
-    const headerByAdapter = { cloudflare: 'x-cloudflare-email-signature', brevo: 'x-mailin-signature', smtp2go: 'x-smtp2go-signature', zeptomail: 'x-zoho-webhook-signature' };
-    const signature = headers[headerByAdapter[adapter]];
-    if (!signature) return equal(headers['x-mail-webhook-secret'], secret);
-    return verifyHmac(secret, raw, signature);
+    // Brevo's transactional webhook docs describe unsigned JSON notifications, so require owner-configured shared
+    // authentication for it and providers without a documented payload signature. https://developers.brevo.com/docs/transactional-webhooks
+    return equal(headers['x-mail-webhook-secret'], secret);
 }
 
 function eventId(payload, normalized) {
