@@ -79,6 +79,11 @@ function load(overrides = null) {
             prefix: env.VALKEY_PREFIX || 'ov:mail:',
         },
 
+        // The browser extension's origins, allowed by CORS on the mask routes: exact
+        // chrome-extension://<id> values, or the literal pattern moz-extension://* (Firefox gives every
+        // install a random origin). Empty: no extension may call this API from a page.
+        extensionOrigins: list('MAIL_EXTENSION_ORIGINS'),
+
         network: {
             url: env.OV_NETWORK_URL || 'https://openvibe.network',
             internalUrl: env.OV_NETWORK_INTERNAL_URL || 'http://127.0.0.1:4000',

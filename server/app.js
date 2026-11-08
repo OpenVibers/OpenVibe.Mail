@@ -103,7 +103,7 @@ async function createApp(opts = {}) {
     app.use('/auth', sso.router(express));
 
     // CORS: a Bearer token may be sent from any first-party origin in the manifests; a cookie may not cross sites.
-    app.use('/api/v1', createCors({ baseUrl: config.baseUrl }));
+    app.use('/api/v1', createCors({ baseUrl: config.baseUrl, extensionOrigins: config.extensionOrigins }));
 
     app.use('/api/v1', rateLimit({
         windowMs: 60_000,

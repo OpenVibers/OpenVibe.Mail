@@ -58,6 +58,25 @@ function createKeyStore({ config, fetchImpl = globalThis.fetch, log = console })
         }
     }
 
+    /**
+     * The Companion's own token: the Network's Dock token (issuer <network issuer>/dock, audience
+     * openvibe.network), the one the browser extension holds after its one-click sign-in. It is a
+     * person's token with a scope ceiling, so it is verified like a session token against the dock
+     * issuer — the same signature, the same key, a different issuer.
+     */
+    async function verifyDock(token, { issuer, audience, now = Date.now() } = {}) {
+        try {
+            const claims = await sdk.verifyUserToken(token, { jwks: url, issuer, audience, now: asMs(now), log });
+            await refreshMirror();
+            return { ok: true, claims };
+        } catch (err) {
+            await refreshMirror();
+            const code = err && err.code;
+            log.warn(`[OpenVibe.Mail] dock token rejected (${code || 'error'})`);
+            return { ok: false, reason: publicReason(err), code, expired: code === 'token.expired' };
+        }
+    }
+
     /** The public key of the key that signed this token, for the house's service-token check. */
     async function pemForToken(token) {
         let kid = null;
@@ -73,7 +92,7 @@ function createKeyStore({ config, fetchImpl = globalThis.fetch, log = console })
         }
     }
 
-    return { ensure, get, loaded, status: client.status, verifyUser, pemForToken, client };
+    return { ensure, get, loaded, status: client.status, verifyUser, verifyDock, pemForToken, client };
 }
 
 module.exports = { createKeyStore, jwksUrl };
