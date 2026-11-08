@@ -70,7 +70,7 @@ async function enqueue({ db, stalwart, config, owner, input, now = Date.now(), p
     }
     const undoUntil = new Date(now + UNDO_MS).toISOString();
     const sendAt = input.send_at ? future(input.send_at, now) : undoUntil;
-    const payload = { from, to, cc, bcc, subject, text, html: sanitize(html, { allowedTags: ['p','br','div','b','strong','i','em','u','a','ul','ol','li','blockquote'], allowedAttributes: { a: ['href'] }, allowedSchemes: ['https','http','mailto'], allowProtocolRelative: false }), attachments: files, inReplyTo, references, thread_id:threadId };
+    const payload = { from, to, cc, bcc, subject, text, html: sanitize(html, { allowedTags: ['p','br','div','b','strong','i','em','u','a','ul','ol','li','blockquote'], allowedAttributes: { a: ['href'] }, allowedSchemes: ['https','http','mailto'], allowProtocolRelative: false }), attachments: files, inReplyTo, references, thread_id:threadId, signature:typeof input.signature === 'string' ? input.signature.slice(0,4000) : '' };
     // Lock the owner's mailbox to serialize quota checks, including concurrent HTTP requests.
     return db.tx(async (t) => {
         await t.maybe(sql`SELECT owner_subject FROM mail_mailboxes WHERE owner_subject=${owner} FOR UPDATE`);

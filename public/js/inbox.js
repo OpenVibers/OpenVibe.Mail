@@ -362,10 +362,10 @@
       if (m.labels && m.labels.length) sub.appendChild(el('span', '', ' · ' + m.labels.join(', ')));
       b.appendChild(sub);
       if (current === 'all' && m.to) b.appendChild(el('span', 'ib-row-to', 'to ' + (Array.isArray(m.to) ? m.to[0] : m.to)));
-      b.addEventListener('click', function () { openMessage(m.id, false); });
-      var swipeStart;
-      b.addEventListener('touchstart', function (e) { swipeStart = { x:e.changedTouches[0].clientX,y:e.changedTouches[0].clientY }; }, { passive:true });
-      b.addEventListener('touchend', function (e) { var t = e.changedTouches[0]; if (swipeStart && Math.abs(t.clientX-swipeStart.x)>90 && Math.abs(t.clientY-swipeStart.y)<35) { updateMessage(m.id,{ archived:true }).then(function () { notice('Archived.'); var undo = el('button','ib-btn is-quiet','Undo archive'); undo.onclick = function () { updateMessage(m.id,{ archived:false }).then(function () { notice('Returned to inbox.'); }); }; statusBar.appendChild(undo); }); } }, { passive:true });
+      b.addEventListener('click', function () { if (!suppressOpen) openMessage(m.id, false); });
+      var swipeStart, suppressOpen = false;
+      b.addEventListener('touchstart', function (e) { suppressOpen = false; swipeStart = { x:e.changedTouches[0].clientX,y:e.changedTouches[0].clientY }; }, { passive:true });
+      b.addEventListener('touchend', function (e) { var t = e.changedTouches[0]; if (swipeStart && Math.abs(t.clientX-swipeStart.x)>90 && Math.abs(t.clientY-swipeStart.y)<35) { suppressOpen = true; updateMessage(m.id,{ archived:true }).then(function () { notice('Archived.'); var undo = el('button','ib-btn is-quiet','Undo archive'); undo.onclick = function () { updateMessage(m.id,{ archived:false }).then(function () { notice('Returned to inbox.'); }); }; statusBar.appendChild(undo); }).catch(function () {}); } }, { passive:true });
       li.appendChild(b);
       ul.appendChild(li);
     });
@@ -497,7 +497,7 @@
     if (m && m[1] !== 'settings') openMessage(decodeURIComponent(m[1]), false); else { openId = null; showRead(false); paintList(); }
   });
 
-  var statusBar, pendingLoad = false;
+  var statusBar, pendingLoad = false, outboxRows = [], outboxCursor = null;
   function notice(text) { if (statusBar) statusBar.textContent = text; }
   function compose(payload,original,mode) { window.MailCompose.open({ api:api,addresses:workspace.addresses, payload:payload,original:original,mode:mode,onQueued:queued }); }
   function queued(result) {
@@ -551,10 +551,13 @@
     var go = el('button','ib-btn is-quiet','Snooze'); go.onclick = function () { if (!snooze.value) { snooze.focus(); return; } updateMessage(m.id,{ snooze_until:new Date(snooze.value).toISOString() }).then(function () { showRead(false); notice('Snoozed until ' + new Date(snooze.value).toLocaleString()); }).catch(function () {}); }; bar.appendChild(go);
     if (folder === 'snoozed') { var wake = el('button','ib-btn is-quiet','Return now'); wake.onclick = function () { updateMessage(m.id,{ snooze_until:null,archived:false }).catch(function () {}); }; bar.appendChild(wake); }
   }
-  function loadOutbox() {
-    api('/api/v1/me/mail/workspace/outbox').then(function (result) {
+  function loadOutbox(more) {
+    var requestedFolder = folder;
+    api('/api/v1/me/mail/workspace/outbox?folder=' + encodeURIComponent(folder) + (more && outboxCursor ? '&cursor=' + encodeURIComponent(outboxCursor) : '')).then(function (result) {
+      if (folder !== requestedFolder) return;
       listEl.textContent = ''; listEl.appendChild(el('h2','ib-h',folder === 'sent' ? 'Sent' : 'Scheduled and pending'));
-      var messages = result.messages.filter(function (m) { return folder === 'sent' ? m.state === 'sent' : ['queued','sending','failed','uncertain'].includes(m.state); });
+      outboxRows = (more ? outboxRows : []).concat(result.messages); outboxCursor = result.next_cursor;
+      var messages = outboxRows;
       if (!messages.length) listEl.appendChild(el('p','ib-quiet','No messages here.'));
       messages.forEach(function (m) { var item = el('article','ib-outbox-item'); var open = el('button','ib-row',m.subject || '(no subject)'); item.appendChild(open); item.appendChild(el('p','ib-quiet',m.state + ' · ' + new Date(m.send_at).toLocaleString()));
         open.onclick = function () { api('/api/v1/me/mail/workspace/outbox/' + m.id).then(function (b) { readEl.textContent = ''; var back = el('button','ib-btn is-quiet','← Mail'); back.onclick = function () { showRead(false); }; readEl.appendChild(back); readEl.appendChild(el('h2','ib-subject',b.payload.subject)); readEl.appendChild(el('p','ib-meta','From ' + b.payload.from + ' · To ' + b.payload.to.join(', '))); readEl.appendChild(el('pre','ib-text',b.payload.text)); (b.payload.attachments || []).forEach(function (a) { var p = el('button','ib-btn is-quiet',a.name); p.onclick = function () { window.MailCompose.preview(window.MailCompose.toFile(a)); }; readEl.appendChild(p); }); (b.outcomes || []).forEach(function (o) { readEl.appendChild(el('p','ib-quiet',(o.to || 'Send') + ': ' + (o.status || o.state) + (o.reason ? ' · ' + o.reason : ''))); }); showRead(true); }).catch(function (err) { notice(err.message); }); };
@@ -562,6 +565,7 @@
         if (m.state === 'uncertain' || m.state === 'failed') item.appendChild(el('p','ib-problem','Open for recipient outcomes. Delivery is not retried automatically.'));
         listEl.appendChild(item);
       });
+      if (outboxCursor) { var older = el('button','ib-btn is-quiet','Older messages'); older.onclick = function () { older.disabled = true; loadOutbox(true); }; listEl.appendChild(older); }
     }).catch(function (err) { notice(err.message); });
   }
   document.addEventListener('keydown',function (e) {

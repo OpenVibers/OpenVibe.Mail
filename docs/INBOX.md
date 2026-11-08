@@ -10,7 +10,7 @@ Migration `0014_mail_workspace.sql` is expand-only. Draft payloads and attachmen
 
 Every submission carries an owner-scoped idempotency key. Send defaults to a 15-second delay; scheduled sends wait until both the scheduled time and undo window have passed. Cancel updates only `queued` rows. The worker atomically claims a row before delivery, preventing two workers or a simultaneous undo from both winning. Cancellation after a claim returns a conflict. Queued sends survive restarts. A lost transport acknowledgement or interrupted claim is shown as uncertain; it is never automatically retried. Per-recipient outcomes remain available, including partial failures. The worker runs once per second and handles 20 sends per tick; due times are earliest dispatch times, not delivery guarantees.
 
-Sent message content is available from the owner's outbox and replies appear in the original conversation. Current Sent/pending views show the latest 100 outbox entries. Attachments are stored with the outbox payload in PostgreSQL; moving payloads to blob storage is a future capacity improvement, not required for delivery correctness.
+Sent message content is available from the owner's outbox and replies appear in the original conversation. Sent and pending views filter before pagination, with stable timestamp/ID cursors and 50 entries per page. Attachments are stored with the outbox payload in PostgreSQL; moving payloads to blob storage is a future capacity improvement, not required for delivery correctness.
 
 ## Search and organization
 

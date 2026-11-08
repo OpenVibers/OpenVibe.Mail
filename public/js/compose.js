@@ -48,9 +48,11 @@
     editor.addEventListener('paste',function (e) { e.preventDefault(); document.execCommand('insertText',false,e.clipboardData.getData('text/plain')); });
     editor.addEventListener('drop',function (e) { e.preventDefault(); });
     if (p.html) editor.innerHTML = p.html; else editor.textContent = p.text || '';
+    if (p.signature && p.html && editor.lastElementChild && editor.lastElementChild.textContent === p.signature) editor.lastElementChild.remove();
+    else if (p.signature && !p.html && editor.textContent.endsWith('\n\n' + p.signature)) editor.textContent = editor.textContent.slice(0,-p.signature.length-2);
     if (mode) { editor.appendChild(node('p','')); var quote = node('blockquote', (original.from || []).join(', ') + ' · ' + (original.date || '') + '\n' + (original.text || '')); editor.appendChild(quote); }
     function signature() { return (addresses.find(function (a) { return a.address === from.value; }) || {}).signature || ''; }
-    var sig = node('p', signature()); sig.className = 'ib-signature';
+    var sig = node('p', options.payload && !p.signature ? '' : signature()); sig.className = 'ib-signature';
     from.onchange = function () { sig.textContent = signature(); };
     form.appendChild(toolbar); form.appendChild(editor); form.appendChild(sig);
     var files = (p.attachments || []).slice(), filesEl = node('ul', null, 'ib-compose-files');
@@ -98,7 +100,7 @@
       submitting = true; send.disabled = true; status.textContent = 'Saving your send…';
       function recipients(value) { return value.split(',').map(function (s) { return s.trim(); }).filter(Boolean); }
       var body = { request_id:requestId,from:from.value,to:recipients(to.value),cc:recipients(cc.value),bcc:recipients(bcc.value),subject:subject.value,
-        text:editor.innerText + (sig.textContent ? '\n\n' + sig.textContent : ''),html:editor.innerHTML + (sig.textContent ? sig.outerHTML : ''),attachments:files };
+        text:editor.innerText + (sig.textContent ? '\n\n' + sig.textContent : ''),html:editor.innerHTML + (sig.textContent ? sig.outerHTML : ''),signature:sig.textContent,attachments:files };
       if (mode && mode !== 'forward') body.reply_to = original.id;
       if (schedule.value) body.send_at = new Date(schedule.value).toISOString();
       try { var result = await options.api('/api/v1/me/mail/workspace/send',{ method:'POST',body:body }); d.close(); options.onQueued(result); }

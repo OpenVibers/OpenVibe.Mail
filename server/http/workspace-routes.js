@@ -25,9 +25,24 @@ function mountWorkspace(router, { db, stalwart, config, principal, wrap, fail, o
         try { res.status(202).json(await compose.enqueue({ db,stalwart,config,owner:ownerOf(req),input:req.body })); }
         catch (err) { invalid(req,res,err); }
     }));
-    router.get(BASE + '/outbox', read, wrap(async (req,res) => res.json({ messages: await db.many(sql`
-        SELECT id,state,send_at,undo_until,created_at,payload->>'subject' AS subject,payload->'to' AS recipients,outcomes
-        FROM mail_compose_outbox WHERE owner_subject=${ownerOf(req)} ORDER BY created_at DESC LIMIT 100`) })));
+    router.get(BASE + '/outbox', read, wrap(async (req,res) => {
+        const folder = req.query.folder || 'all';
+        if (!['all','sent','scheduled'].includes(folder)) return fail(req,res,422,'mail.outbox.folder','Choose a valid outbox folder.');
+        let before = null, beforeId = null;
+        if (req.query.cursor) {
+            try {
+                [before,beforeId] = JSON.parse(Buffer.from(String(req.query.cursor),'base64url').toString());
+                if (!Number.isFinite(Date.parse(before)) || !/^[a-f0-9-]{36}$/.test(beforeId)) throw new Error();
+            } catch { return fail(req,res,422,'mail.outbox.cursor','Invalid outbox cursor.'); }
+        }
+        const rows = await db.many(sql`SELECT id,state,send_at,undo_until,created_at,payload->>'subject' AS subject,payload->'to' AS recipients,outcomes
+            FROM mail_compose_outbox WHERE owner_subject=${ownerOf(req)}
+            AND (${folder}='all' OR (${folder}='sent' AND state='sent') OR (${folder}='scheduled' AND state IN ('queued','sending','failed','uncertain')))
+            AND (${before}::timestamptz IS NULL OR (created_at,id) < (${before}::timestamptz,${beforeId}))
+            ORDER BY created_at DESC,id DESC LIMIT 51`);
+        const messages = rows.slice(0,50), last = messages.at(-1);
+        res.json({ messages,next_cursor:rows.length>50 ? Buffer.from(JSON.stringify([last.created_at,last.id])).toString('base64url') : null });
+    }));
     router.get(BASE + '/outbox/:id', read, wrap(async (req,res) => {
         const row = await db.maybe(sql`SELECT id,state,send_at,payload,outcomes FROM mail_compose_outbox WHERE owner_subject=${ownerOf(req)} AND id=${req.params.id}`);
         if (!row) return fail(req,res,404,'mail.not_found','That send is not here.');

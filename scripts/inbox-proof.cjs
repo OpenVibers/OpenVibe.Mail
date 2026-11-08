@@ -10,6 +10,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_PATH || '/home/workstation/o
   const user = s.network.addUser('inbox-proof');
   await s.post('/api/v1/masks',{ as:user,json:{ label:'Proof mailbox' } });
   const mailbox = await s.db.value(sql`SELECT address FROM mail_mailboxes WHERE owner_subject=${user.subject}`);
+  await s.put('/api/v1/me/mail/workspace/signature',{ as:user,json:{ address:mailbox,signature:'Proof signature' } });
   const m = s.mail.deliver({ mailboxAddress:mailbox,to:mailbox,from:'reader@example.net',subject:'Inbox acceptance fixture',text:'This message exercises the real inbox routes.',attachments:[{ part:'1',name:'note.txt',type:'text/plain',bytes:Buffer.from('Attachment preview fixture') }] });
   m.threadId = 'conversation1';
   const browser = await chromium.launch({ executablePath:'/usr/bin/google-chrome',args:['--no-sandbox'] });
@@ -44,8 +45,16 @@ const { chromium } = require(process.env.PLAYWRIGHT_PATH || '/home/workstation/o
       await page.getByRole('button',{ name:'Send · 15 seconds to undo' }).click();
       await page.getByRole('button',{ name:'Undo send',exact:true }).click();
       await page.getByRole('dialog').waitFor();
+      assert.equal((await page.locator('.ib-compose').innerText()).match(/Proof signature/g).length,1,'Undo must not duplicate the signature');
+      await page.getByLabel('Schedule send (optional)').fill(new Date(Date.now()+3600000).toISOString().slice(0,16));
+      await page.getByRole('button',{ name:'Send · 15 seconds to undo' }).click();
+      await page.getByRole('button',{ name:'Undo send',exact:true }).waitFor();
+      await page.goto(s.base+'/inbox?folder=scheduled');
+      await page.getByRole('button',{ name:'Cancel and edit',exact:true }).click();
+      await page.getByRole('dialog').waitFor();
       page.once('dialog',(d) => d.accept());
       await page.getByRole('button',{ name:'Discard',exact:true }).click();
+      await page.goto(s.base+'/inbox');
       await page.getByRole('searchbox').fill('subject:Inbox has:attachment');
       await page.getByRole('button',{ name:'Search',exact:true }).click();
       await page.locator('.ib-row').first().click();
@@ -61,7 +70,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_PATH || '/home/workstation/o
       assert.ok(await page.getByRole('heading',{ name:/Rules \(/ }).isVisible());
       await page.screenshot({ path:`${out}/settings-${width}-${scheme}.png`,fullPage:true });
       assert.deepEqual(errors,[]);
-      console.log(`${width} ${scheme}: inbox, composer, reply all, upload/preview, undo, search, Settings, no overflow or page errors`);
+      console.log(`${width} ${scheme}: inbox, composer, reply all, upload/preview, undo, schedule/cancel, search, Settings, no overflow or page errors`);
       await context.close();
     }
   } finally { await browser.close(); await s.close(); }

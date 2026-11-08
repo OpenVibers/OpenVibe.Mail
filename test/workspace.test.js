@@ -114,3 +114,17 @@ test('signatures are scoped to owned addresses and outgoing HTML is cleaned', as
         const saved = await s.get(B+'/outbox/'+r.body.id,{ as:alice }); assert.doesNotMatch(saved.body.payload.html,/script|onclick|javascript/);
     } finally { await s.close(); }
 });
+
+test('outbox filters before pagination so cancelled sends cannot hide scheduled mail', async () => {
+    const { s,alice,payload } = await setup();
+    try {
+        for (let i=0;i<52;i++) await s.db.exec(sql`INSERT INTO mail_compose_outbox(id,owner_subject,request_id,payload,state,send_at,undo_until)
+            VALUES(${require('crypto').randomUUID()},${alice.subject},${'page-'+i},${JSON.stringify(payload)}::jsonb,${i===51 ? 'cancelled' : 'queued'},now(),now())`);
+        const first = await s.get(B+'/outbox?folder=scheduled',{ as:alice }); assert.equal(first.status,200,JSON.stringify(first.body));
+        assert.equal(first.body.messages.length,50); assert.ok(first.body.next_cursor);
+        const second = await s.get(B+'/outbox?folder=scheduled&cursor='+first.body.next_cursor,{ as:alice });
+        assert.equal(second.body.messages.length,1); assert.equal(second.body.next_cursor,null);
+        assert.equal(new Set([...first.body.messages,...second.body.messages].map((m) => m.id)).size,51);
+        assert.equal((await s.get(B+'/outbox?folder=sent',{ as:alice })).body.messages.length,0);
+    } finally { await s.close(); }
+});
