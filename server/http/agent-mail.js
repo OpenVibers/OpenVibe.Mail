@@ -107,6 +107,22 @@ function mountAgentMail(app, { db, config, stalwart, principal, keys, smtp = nul
         return await findAgentInbox({ db, owner: who.subject, agentId }).catch(() => null);
     }
 
+    // A standing intent may read a letter only as the owner's own words when Mail can prove the exact
+    // sender address belongs to that owner. A shared openvibe.email domain is not that proof.
+    app.get('/internal/mail/agents/:agentId/own-sender', guard('mail.agent.read'), wrap(async (req, res) => {
+        const inbox = await inboxFor(req);
+        if (!inbox) return res.status(404).json({ status: 404, code: 'mail.not_found', detail: 'That inbox does not exist.' });
+        const address = String(req.query.address || '').trim().toLowerCase();
+        if (!/^[^\s@]+@[^\s@]+$/.test(address) || address.length > 320) return res.status(422).json({ status: 422, code: 'mail.address.invalid', detail: 'Give one bare email address.' });
+        const owned = await db.maybe(`SELECT 1 AS owned FROM (
+            SELECT owner_subject, address FROM mail_mailboxes
+            UNION ALL SELECT owner_subject, address FROM mail_masks WHERE enabled AND (expires_at IS NULL OR expires_at > now())
+            UNION ALL SELECT owner_subject, address FROM mail_burners WHERE expires_at > now()
+            UNION ALL SELECT owner_subject, address FROM mail_agent_inboxes
+        ) a WHERE a.owner_subject = $1 AND lower(a.address) = $2 LIMIT 1`, [inbox.owner, address]);
+        return res.json({ owned: Boolean(owned) });
+    }));
+
     app.get('/internal/mail/agents/:agentId/messages/:messageId', guard('mail.agent.read'), wrap(async (req, res) => {
         const inbox = await inboxFor(req);
         if (!inbox) return res.status(404).json({ status: 404, code: 'mail.not_found', detail: 'That inbox does not exist.' });

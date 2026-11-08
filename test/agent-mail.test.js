@@ -44,6 +44,36 @@ const asActor = (t, user, capabilities) => ({ bearer: serviceToken(t, { capabili
 
 const HOUR = 3600_000;
 
+test('the internal owner-address check accepts exact owned addresses only', async (t) => {
+    const s = await boot();
+    t.after(() => s.close());
+    const alice = s.network.addUser('alice');
+    const bob = s.network.addUser('bob');
+    const inbox = (await s.post('/api/v1/agent-inboxes', { as: alice, json: { agent_id: 'helper' } })).body.agent_inbox;
+    const mailbox = await s.db.value('SELECT address FROM mail_mailboxes WHERE owner_subject = $1', [alice.subject]);
+    const mask = (await s.post('/api/v1/masks', { as: alice, json: { label: 'shop' } })).body.mask;
+    const burner = (await s.post('/api/v1/burners', { as: alice, json: { expires: '1h' } })).body.burner;
+    const other = (await s.post('/api/v1/agent-inboxes', { as: bob, json: { agent_id: 'helper' } })).body.agent_inbox;
+    const url = (address) => `/internal/mail/agents/helper/own-sender?address=${encodeURIComponent(address)}`;
+    const auth = asActor(s, alice);
+    for (const address of [mailbox, mask.address, burner.address, inbox.address]) {
+        const found = await s.get(url(address), auth);
+        assert.strictEqual(found.status, 200, found.text);
+        assert.strictEqual(found.body.owned, true);
+    }
+    for (const address of [other.address, 'stranger@openvibe.email', 'stranger@example.com']) {
+        const found = await s.get(url(address), auth);
+        assert.strictEqual(found.status, 200, found.text);
+        assert.strictEqual(found.body.owned, false);
+    }
+    await s.db.query('UPDATE mail_masks SET enabled = false WHERE id = $1', [mask.id]);
+    await s.db.query("UPDATE mail_burners SET expires_at = now() - interval '1 second' WHERE id = $1", [burner.id]);
+    assert.strictEqual((await s.get(url(mask.address), auth)).body.owned, false);
+    assert.strictEqual((await s.get(url(burner.address), auth)).body.owned, false);
+    assert.strictEqual((await s.get(url(mailbox), asActor(s, bob))).body.owned, false);
+    assert.strictEqual((await s.get(url(mailbox), asActor(s, alice, ['mail.agent.reply']))).status, 403);
+});
+
 test('the switch is OFF by default and nothing is announced until the person turns it on', async (t) => {
     const smtp = fakeSmtp();
     const s = await boot({ smtp });
