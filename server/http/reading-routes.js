@@ -15,6 +15,7 @@ const { cleanHtml, downloadType, dispositionFor } = require('../domain/reading')
 const masks = require('../domain/masks');
 const agentInboxes = require('../domain/agent-inboxes');
 const { mailboxAddressFor } = require('../domain/mailboxes');
+const { sql } = require('openvibe-sdk/db');
 
 const ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 const PART_RE = /^[A-Za-z0-9._-]{1,64}$/;
@@ -42,6 +43,28 @@ function mountReading(router, { db, stalwart, principal, wrap, fail, ownerOf }) 
     router.get('/api/v1/me/mail/addresses', read, wrap(async (req, res) => {
         const { mailbox, list } = await addressesOf(ownerOf(req));
         return noStore(res).json({ mailbox, addresses: list });
+    }));
+
+    // Inbox AI is a mailbox-level opt-in. No row is equivalent to off for old and new accounts.
+    router.get('/api/v1/me/mail/ai-settings', read, wrap(async (req, res) => {
+        const owner = ownerOf(req);
+        const row = await db.maybe(sql`SELECT enabled, changed_at FROM mail_inbox_ai_consent WHERE owner_subject = ${owner}`);
+        return noStore(res).json({ enabled: !!(row && row.enabled), changed_at: row ? row.changed_at : null });
+    }));
+
+    router.put('/api/v1/me/mail/ai-settings', write, wrap(async (req, res) => {
+        if (!req.body || typeof req.body.enabled !== 'boolean') {
+            return fail(req, res, 400, 'mail.ai_settings.invalid', 'enabled must be true or false.');
+        }
+        const owner = ownerOf(req);
+        const mailbox = await mailboxAddressFor(db, owner);
+        if (!mailbox) return fail(req, res, 404, 'mail.not_found', 'Create your mailbox before changing its Inbox AI setting.');
+        const row = await db.maybe(sql`
+            INSERT INTO mail_inbox_ai_consent (owner_subject, enabled)
+            VALUES (${owner}, ${req.body.enabled})
+            ON CONFLICT (owner_subject) DO UPDATE SET enabled = EXCLUDED.enabled, changed_at = now()
+            RETURNING enabled, changed_at`);
+        return noStore(res).json({ enabled: row.enabled, changed_at: row.changed_at });
     }));
 
     router.get('/api/v1/me/mail/messages', read, wrap(async (req, res) => {

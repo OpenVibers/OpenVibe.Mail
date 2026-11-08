@@ -71,6 +71,20 @@ test('a person reads their mailbox, one address at a time or all together', asyn
     assert.strictEqual(notMine.status, 404);
 });
 
+test('Inbox AI consent is per mailbox, starts off, and rejects malformed settings', async (t) => {
+    const s = await boot();
+    t.after(() => s.close());
+    const alice = s.network.addUser('alice');
+    const bob = s.network.addUser('bob');
+    await mailboxOf(s, alice);
+    await mailboxOf(s, bob);
+    assert.deepStrictEqual((await s.get('/api/v1/me/mail/ai-settings', { as: alice })).body.enabled, false);
+    assert.strictEqual((await s.put('/api/v1/me/mail/ai-settings', { as: alice, json: { enabled: 'yes' } })).status, 400);
+    assert.strictEqual((await s.put('/api/v1/me/mail/ai-settings', { as: alice, json: { enabled: true } })).body.enabled, true);
+    assert.strictEqual((await s.get('/api/v1/me/mail/ai-settings', { as: bob })).body.enabled, false);
+    assert.strictEqual((await s.put('/api/v1/me/mail/ai-settings', { as: alice, json: { enabled: false } })).body.enabled, false);
+});
+
 test('a message is read by its owner only, its HTML cleaned, and it can be marked and trashed', async (t) => {
     const s = await boot();
     t.after(() => s.close());

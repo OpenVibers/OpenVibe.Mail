@@ -20,7 +20,7 @@
   var listEl = root.querySelector('[data-mail-list]');
   var readEl = root.querySelector('[data-mail-read]');
   var addresses = Array.isArray(data.addresses) ? data.addresses : [];
-  var current = 'all', cursor = null, rows = [], openId = null, loading = false;
+  var current = 'all', cursor = null, rows = [], openId = null, loading = false, aiEnabled = false;
   var KIND = { mailbox: 'Your mailbox', mask: 'Mask', agent: 'Agent inbox', burner: 'Burner' };
 
   function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
@@ -71,6 +71,23 @@
       ul.appendChild(li);
     });
     side.appendChild(ul);
+    var aiBox = el('section', 'ib-ai-settings');
+    aiBox.appendChild(el('h2', 'ib-h', 'Inbox AI'));
+    var aiLabel = el('label', 'ib-ai-label');
+    var aiToggle = el('input');
+    aiToggle.type = 'checkbox'; aiToggle.checked = aiEnabled; aiToggle.setAttribute('aria-label', 'Turn on Inbox AI for this mailbox');
+    aiToggle.addEventListener('change', function () {
+      aiToggle.disabled = true;
+      api('/api/v1/me/mail/ai-settings', { method: 'PUT', body: { enabled: aiToggle.checked } })
+        .then(function (state) { aiEnabled = !!state.enabled; aiCopy.textContent = aiEnabled ? 'On · uses your OpenVibe.AI allowance. Drafts wait for your click.' : 'Off · your mail is not sent for AI triage.'; })
+        .catch(function (err) { aiToggle.checked = aiEnabled; aiCopy.textContent = 'Could not save this setting. ' + err.message; })
+        .finally(function () { aiToggle.disabled = false; });
+    });
+    aiLabel.appendChild(aiToggle); aiLabel.appendChild(el('span', '', 'Triage new mail with AI'));
+    aiBox.appendChild(aiLabel);
+    var aiCopy = el('p', 'ib-quiet', aiEnabled ? 'On · uses your OpenVibe.AI allowance. Drafts wait for your click.' : 'Off · your mail is not sent for AI triage.');
+    aiBox.appendChild(aiCopy);
+    side.appendChild(aiBox);
     // New mask: one line, for one site.
     var form = el('form', 'ib-newmask');
     var input = el('input', 'ib-input');
@@ -279,6 +296,7 @@
   // The addresses come from the API when the shell does not carry them.
   function begin() {
     paintSide();
+    api('/api/v1/me/mail/ai-settings').then(function (state) { aiEnabled = !!state.enabled; paintSide(); }).catch(function () {});
     loadList();
   }
   if (addresses.length) begin();
