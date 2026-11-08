@@ -43,13 +43,16 @@
     "a mask never forwards outside OpenVibe",
     "the code extractor is the only reader of a body and drops it immediately",
     "an expired burner's mail and account are deleted by a due-based purge job; a failure keeps the row for the next run",
-    "an agent's reply is recorded with its outcome (mail_sent_mail) and carries no attachment; a message body reaches an event only as the excerpt of an inbox whose answering is on"
+    "an agent's reply is recorded with its outcome (mail_sent_mail) and carries no attachment; a message body reaches an event only as the excerpt of an inbox whose answering is on",
+    "an IMAP app password is sealed with AES-256-GCM under MAIL_SECRETS_KEY (owner and connection id as AAD) before the INSERT; no API answer or log line carries it",
+    "an IMAP mailbox is read only: EXAMINE and BODY.PEEK, no STORE, MOVE, EXPUNGE or DELETE, and the TLS socket resolves through openvibe-shared/egress so a private address is refused"
   ],
   "tests": {
     "unit": "node test/run.js (PGlite, in-process Network and mail server)",
     "postgres": "MAIL_TEST_STORE=pg node test/run.js",
     "acceptance": "node test/stalwart/run.js (pinned Stalwart + PostgreSQL, fs blobs by default and one S3 CI run; SMTP delivery, code, forged To/Cc/Delivered-To isolation, 300-message isolation, expiry account deletion and bounce, disabled-mask bounce, 404s, no body in logs, blob on disk)",
-    "frontdoor": "node test/frontdoor.test.js (CORS allow-list, same-site cookie write rule, /me/mail)"
+    "frontdoor": "node test/frontdoor.test.js (CORS allow-list, same-site cookie write rule, /me/mail)",
+    "imap": "node test/imap.test.js (TLS required, private target refused, the seal is not returned or logged, UID resume, UIDVALIDITY reset, disconnect with and without the pulled summaries)"
   },
   "deployed": false,
   "deployment": "M1 is deliberately not deployed by this job. Opus installs it on the host; docs/INSTALL.md has the steps and docs/DNS.md the records.",
