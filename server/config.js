@@ -123,6 +123,7 @@ function load(overrides = null) {
             mask: maskDomain,
             burners: burnerDomains,
         },
+        inbound: { mx: list('MAIL_CUSTOM_DOMAIN_MX') },
 
         stalwart: {
             url: (env.STALWART_URL || 'http://127.0.0.1:8080').replace(/\/+$/, ''),

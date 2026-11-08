@@ -75,10 +75,11 @@ test('domain status is normalized and SES signatures cover SigV4 canonical data'
     assert.match(signed.authorization, /SignedHeaders=content-type;host;x-amz-date/);
     assert.equal(normalizeWebhook('resend', { type: 'email.bounced', to: 'bad@example.net' }).kind, 'hard_bounce');
     assert.deepEqual(normalizeWebhook('ses', { notificationType: 'Bounce', Bounce: { bouncedRecipients: [{ emailAddress: 'bad@example.net' }] } }), {
-        adapter: 'ses', event: 'bounce', recipient: 'bad@example.net', kind: 'hard_bounce',
+        adapter: 'ses', event: 'bounce', recipient: 'bad@example.net', messageId: null, kind: 'hard_bounce',
     });
     assert.deepEqual(normalizeWebhook('mailersend', { type: 'activity.spam_complaint', data: { recipient: 'bad@example.net' } }), {
-        adapter: 'mailersend', event: 'activity.spam_complaint', recipient: 'bad@example.net', kind: 'complaint',
+        adapter: 'mailersend', event: 'activity.spam_complaint', recipient: 'bad@example.net', messageId: null, kind: 'complaint',
     });
+    assert.equal(normalizeWebhook('resend', { type: 'email.bounced', data: { to: 'bad@example.net', email_id: 'provider-message' } }).messageId, 'provider-message');
     assert.equal(normalizeWebhook('brevo', { event: 'softBounce', email: 'slow@example.net' }).kind, 'soft_bounce');
 });

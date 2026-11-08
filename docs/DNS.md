@@ -1,5 +1,20 @@
 # DNS for M1 (receive only)
 
+## Person-owned custom domains
+
+Add the domain in `/inbox`. Mail gives the owner a unique `_openvibe-mail.<domain>` TXT value and the required
+MX, provider DKIM, and SPF records. Set `MAIL_CUSTOM_DOMAIN_MX` to the hostname that delivers SMTP to this
+Stalwart instance (for the current direct inbound route, `mail.openvibe.email`). The owner adds these records at
+their DNS provider and clicks **Check DNS**. Mail moves through `pending_ownership`, `pending_mx`, `pending_dkim`,
+then `active`; it registers the domain in Stalwart only after TXT and MX match. The SQL directory then maps each
+claimed custom address to the person's existing mailbox. Sending as the custom domain requires at least one
+enabled outbound provider with matching DKIM DNS and a verified domain status. Rechecking removes sending status
+if DNS is withdrawn.
+
+Cloudflare DNS can host these records. A domain using Cloudflare Email Routing needs its own routing rule to deliver
+to the Stalwart inbound hostname; configuring DNS alone does not create that rule. Keep `MAIL_CUSTOM_DOMAIN_MX`
+matched to the actual receiving route. Mail never creates a Cloudflare account or zone for the owner.
+
 M1 receives for `openvibe.email`, `mask.openvibe.email` and each burner subdomain in `BURNER_DOMAINS`. It does not
 send: until M2 there is no DKIM key and no sending path, so SPF and DMARC are strict and closed.
 
