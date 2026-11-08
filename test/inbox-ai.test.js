@@ -6,6 +6,7 @@ const { CATEGORIES, validateTriage, triageMailbox, createDraft } = require('../s
 const { boot } = require('./helpers/boot');
 const { runInboxAi } = require('../server/jobs/inbox-ai');
 const { sql } = require('openvibe-sdk/db');
+const { senderAddress } = require('../server/domain/inbox-ai-send');
 
 test('accepts only the five mailbox categories and bounded thread summaries', () => {
     assert.deepStrictEqual(CATEGORIES, ['needs_reply', 'to_read', 'receipts', 'newsletters', 'other']);
@@ -114,4 +115,11 @@ test('turning Inbox AI off during a batch stops the next model call', async (t) 
     } });
     assert.strictEqual(result.triaged, 1);
     assert.strictEqual(calls, 1);
+});
+
+test('a sender with a display name is replied to at the bare address', () => {
+    assert.strictEqual(senderAddress(['Shop Team <Orders@Shop.example>']), 'orders@shop.example');
+    assert.strictEqual(senderAddress('orders@shop.example'), 'orders@shop.example');
+    assert.strictEqual(senderAddress(['Shop Team']), null);
+    assert.strictEqual(senderAddress([]), null);
 });

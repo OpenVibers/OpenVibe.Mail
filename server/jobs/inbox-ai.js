@@ -5,9 +5,11 @@ const { mailboxAddressFor } = require('../domain/mailboxes');
 const { createInboxAnalyzer } = require('../ai/inbox');
 const { matchedRule } = require('../domain/inbox-ai-rules');
 const { randomUUID } = require('node:crypto');
+const { senderAddress } = require('../domain/inbox-ai-send');
 
 const LEASE_KEY = 'inbox_ai_lease';
-const LEASE_MS = 60_000;
+// Under the 60 s tick, so a lease taken at one tick has expired by the next.
+const LEASE_MS = 50_000;
 
 async function takeLease(db, now = Date.now()) {
     return db.maybe(sql`
@@ -49,8 +51,9 @@ async function runInboxAi({ db, stalwart, analyze, log = console, now = () => Da
                 const previousCategory = triage.category;
                 if (rule) triage.category = rule.category;
                 const sender = (message.from || [])[0];
-                const draft = triage.category === 'needs_reply' && sender
-                    ? { to: sender, subject: /^re:/i.test(message.subject || '') ? message.subject : `Re: ${message.subject || ''}`, body: triage.draft }
+                const replyTo = senderAddress(sender);
+                const draft = triage.category === 'needs_reply' && replyTo
+                    ? { to: replyTo, subject: /^re:/i.test(message.subject || '') ? message.subject : `Re: ${message.subject || ''}`, body: triage.draft }
                     : null;
                 await db.tx(async (t) => {
                     await t.exec(sql`

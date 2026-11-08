@@ -9,7 +9,7 @@ function createInboxAnalyzer({ config, fetchImpl = globalThis.fetch }) {
     if (!config.ai.clientSecret) return null;
     const tokens = createServiceTokenClient({
         tokenUrl: `${config.network.internalUrl}/oauth/token`, clientId: config.ai.clientId,
-        clientSecret: config.ai.clientSecret, audience: 'openvibe.ai', scope: 'ai.run.create', fetch: fetchImpl,
+        clientSecret: config.ai.clientSecret, audience: 'openvibe.ai', scope: 'ai.run.create ai.run.read', fetch: fetchImpl,
     });
     const client = createClient({ baseUrl: config.ai.url, getToken: () => tokens.getToken(), fetch: fetchImpl, retries: 0 });
     const ai = createAiClient(client, { baseUrl: config.ai.url });

@@ -20,7 +20,7 @@ async function sendInboxDraft({ db, config, stalwart, smtp, owner, threadId, bod
     const original = await stalwart.readMessage({ mailboxAddress: mailbox.address, id: draft.message_id });
     if (!original || original.spam) return { status: 404, code: 'mail.not_found' };
     const to = senderAddress(original.from);
-    if (!to || to !== String(draft.draft_to || '').toLowerCase()) return { status: 422, code: 'mail.ai_draft.recipient_changed' };
+    if (!to || to !== senderAddress(draft.draft_to)) return { status: 422, code: 'mail.ai_draft.recipient_changed' };
     const text = typeof body === 'string' ? body : draft.draft_body;
     const title = typeof subject === 'string' ? subject : draft.draft_subject;
     if (!String(text || '').trim() || String(text).length > 10000 || String(title || '').length > 2000 || /[\r\n\u0000]/.test(String(title || ''))) {
