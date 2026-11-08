@@ -67,6 +67,16 @@ function mountReading(router, { db, stalwart, principal, wrap, fail, ownerOf }) 
         return noStore(res).json({ enabled: row.enabled, changed_at: row.changed_at });
     }));
 
+    router.get('/api/v1/me/mail/triage', read, wrap(async (req, res) => {
+        const owner = ownerOf(req);
+        const items = await db.many(sql`SELECT thread_id, message_id, category, summary, draft_to, draft_subject,
+            draft_body, draft_state, received_at FROM mail_inbox_ai_threads WHERE owner_subject = ${owner}
+            ORDER BY received_at DESC NULLS LAST LIMIT 200`);
+        const counts = Object.fromEntries(['needs_reply', 'to_read', 'receipts', 'newsletters', 'other'].map((category) =>
+            [category, items.filter((item) => item.category === category).length]));
+        return noStore(res).json({ counts, threads: items });
+    }));
+
     router.get('/api/v1/me/mail/messages', read, wrap(async (req, res) => {
         const owner = ownerOf(req);
         const { mailbox, list } = await addressesOf(owner);

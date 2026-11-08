@@ -326,7 +326,7 @@ function createStalwartClient({ config, fetchImpl = globalThis.fetch, log = cons
 
     // ---- reading your own mail (M1.5): the owner's page asks, the answer goes to them and is not kept ----
 
-    const READ_LIST_PROPS = ['id', 'from', 'to', 'subject', 'receivedAt', 'keywords', 'hasAttachment', 'headers'];
+    const READ_LIST_PROPS = ['id', 'threadId', 'from', 'to', 'subject', 'receivedAt', 'keywords', 'hasAttachment', 'headers'];
 
     /**
      * A page of the person's mailbox, newest first. `recipient` keeps the messages the server stamped for one of their
@@ -355,6 +355,7 @@ function createStalwartClient({ config, fetchImpl = globalThis.fetch, log = cons
             if (wanted && to !== wanted) continue;
             messages.push({
                 id: m.id,
+                threadId: m.threadId || m.id,
                 from: (m.from || []).map((a) => (a.name ? `${a.name} <${a.email}>` : a.email)).filter(Boolean),
                 to: to ? [to] : (m.to || []).map((a) => a.email).filter(Boolean).slice(0, 1),
                 subject: m.subject || null,
@@ -378,7 +379,7 @@ function createStalwartClient({ config, fetchImpl = globalThis.fetch, log = cons
         if (!accountId) return null;
         const got = await one('Email/get', {
             accountId, ids: [id],
-            properties: ['id', 'from', 'to', 'cc', 'subject', 'receivedAt', 'sentAt', 'keywords', 'textBody', 'htmlBody', 'attachments', 'bodyValues', 'headers', 'hasAttachment'],
+            properties: ['id', 'threadId', 'from', 'to', 'cc', 'subject', 'receivedAt', 'sentAt', 'keywords', 'textBody', 'htmlBody', 'attachments', 'bodyValues', 'headers', 'hasAttachment'],
             fetchTextBodyValues: true, fetchHTMLBodyValues: true, maxBodyValueBytes: 1024 * 1024,
         }, 'e');
         const m = (got.list || [])[0];
@@ -390,6 +391,7 @@ function createStalwartClient({ config, fetchImpl = globalThis.fetch, log = cons
         const addr = (list) => (list || []).map((a) => (a.name ? `${a.name} <${a.email}>` : a.email)).filter(Boolean);
         return {
             id: m.id,
+            threadId: m.threadId || m.id,
             from: addr(m.from), to: addr(m.to), cc: addr(m.cc),
             subject: m.subject || null,
             date: m.sentAt || m.receivedAt || null,
