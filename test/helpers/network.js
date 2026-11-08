@@ -19,13 +19,15 @@ async function startNetwork() {
     const { publicKey, privateKey } = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
     const publicPem = publicKey.export({ type: 'spki', format: 'pem' });
     const privatePem = privateKey.export({ type: 'pkcs8', format: 'pem' });
-    const st = { users: new Map(), requests: [], down: false };
+    const st = { users: new Map(), requests: [], down: false, trust: new Map(), verifiedEmails: new Map() };
     let issuer = null;
     let nextUserId = 1;
 
-    function addUser(username, { role = 'user' } = {}) {
+    function addUser(username, { role = 'user', ageDays = 90, emailVerified = true, verifiedEmails = [] } = {}) {
         const u = { id: nextUserId++, subject: ids.newId('user'), username, role };
         st.users.set(u.id, u);
+        st.trust.set(u.subject, { kind: 'account', account_age_hours: ageDays * 24, account_age_days: ageDays, email_verified: emailVerified, verified: ageDays >= 30 });
+        st.verifiedEmails.set(u.subject, new Set(verifiedEmails.map((email) => email.toLowerCase())));
         return u;
     }
 
@@ -53,6 +55,15 @@ async function startNetwork() {
             const url = new URL(req.url, 'http://x');
             if (url.pathname === '/api/.well-known/jwks') return json(200, { public_key: publicPem, algorithm: 'RS256' });
             if (st.down) return json(503, { error: 'network is restarting' });
+            if (url.pathname === '/oauth/token' && req.method === 'POST') return json(200, { access_token: 'test-network-service', expires_in: 300, scope: 'identity.trust.read identity.emails.read' });
+            if (req.headers.authorization === 'Bearer test-network-service' && url.pathname.startsWith('/api/v1/trust/')) {
+                const trust = st.trust.get(decodeURIComponent(url.pathname.slice('/api/v1/trust/'.length)));
+                return json(trust ? 200 : 404, trust || { error: 'not found' });
+            }
+            if (req.headers.authorization === 'Bearer test-network-service' && url.pathname === '/api/v1/identity/emails/verified-check' && req.method === 'POST') {
+                let input = {}; try { input = JSON.parse(raw.toString('utf8')); } catch { /* invalid means unverified */ }
+                return json(200, { verified: !!st.verifiedEmails.get(input.subject)?.has(String(input.email || '').toLowerCase()) });
+            }
             return json(404, { error: 'not found' });
         });
     });

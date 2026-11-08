@@ -7,6 +7,21 @@ mailbox over IMAP (TLS only, read only, app password sealed with `MAIL_SECRETS_K
 person edits and clicks Send; external delivery remains closed unless the configured outbound relay is enabled. See
 [Inbox AI](docs/INBOX-AI.md) for the consent, rules, journal, undo and receipts APIs.
 
+## Person mail
+
+`/inbox` also lets a person create a named address or alias, compose plain-text mail, attach a custom domain, and
+forward a copy to another email they verified on their Network account. Sending requires a verified account email,
+a one-day-old account, a verified sender domain, and a live Network trust check. The allowance starts at 20
+recipients per day and rises to 50 or 100 with account age and successful history. Each message has at most 10
+recipients. Hard bounces and complaints tied to provider message IDs pause the sender; a report link is in the
+message and its `X-OpenVibe-Report-Abuse` header for SMTP delivery. No bulk list mode is offered.
+
+Forwarding checks Network ownership when a rule is created and again before each copy. A revoked address disables
+its rule. Only non-junk plain-text messages without attachments are copied; an ambiguous provider response is not
+retried automatically. Network service credentials and the `identity.trust.read` and `identity.emails.read` grants
+must be present. `MAIL_OUTBOUND=on` and an enabled provider remain required for external sending and forwarding.
+See [custom-domain DNS](docs/DNS.md) for the inbound path and verification states.
+
 ## M1.5: read your mail (2026-11-07)
 
 `/inbox` on openvibe.email shows a signed-in person's mailbox and the addresses that deliver into it (masks, agent

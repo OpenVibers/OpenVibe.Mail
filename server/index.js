@@ -16,6 +16,7 @@ const { startPurgeJob } = require('./jobs/purge');
 const { startAgentMailJob } = require('./jobs/agent-mail');
 const { startInboxAiJob } = require('./jobs/inbox-ai');
 const { startImapPullJob } = require('./jobs/imap-pull');
+const { startForwardingJob } = require('./jobs/forwarding');
 
 async function main() {
     const config = configLib.load();
@@ -57,6 +58,7 @@ async function main() {
     // there is nothing to open, and the job is a no-op.
     const imapPull = startImapPullJob({ db, config, log });
     const workspace = require('./jobs/workspace').startWorkspaceJob({ db, stalwart, config, log });
+    const forwarding = startForwardingJob({ db, stalwart, config, log });
 
     const { app } = await createApp({ config, store, stalwart, events, log });
 
@@ -71,6 +73,7 @@ async function main() {
         inboxAi.stop();
         imapPull.stop();
         workspace.stop();
+        forwarding.stop();
         events.stop();
         server.close(() => {
             store.close().finally(() => process.exit(0));
@@ -80,7 +83,7 @@ async function main() {
     process.on('SIGTERM', () => shutdown('SIGTERM'));
     process.on('SIGINT', () => shutdown('SIGINT'));
 
-    return { server, store, stalwart, events, purge, agentMail, inboxAi, imapPull };
+    return { server, store, stalwart, events, purge, agentMail, inboxAi, imapPull, forwarding };
 }
 
 if (require.main === module) {

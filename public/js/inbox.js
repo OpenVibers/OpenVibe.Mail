@@ -21,7 +21,7 @@
   var readEl = root.querySelector('[data-mail-read]');
   var addresses = Array.isArray(data.addresses) ? data.addresses : [];
   var current = 'all', cursor = null, rows = [], openId = null, loading = false, aiEnabled = false, triageThreads = [], aiRules = [], aiJournal = [], imapMailboxes = [];
-  var settingsPage = root.hasAttribute('data-mail-settings'), folder = 'inbox', search = '', selectedLabel = '', workspace = { addresses:[], labels:[] }, openedMessage = null;
+  var settingsPage = root.hasAttribute('data-mail-settings'), folder = 'inbox', search = '', selectedLabel = '', workspace = { addresses:[], labels:[] }, openedMessage = null, customDomains = [], forwards = [];
   var KIND = { mailbox: 'Your mailbox', mask: 'Mask', agent: 'Agent inbox', burner: 'Burner' };
 
   function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
@@ -75,6 +75,55 @@
       ul.appendChild(li);
     });
     side.appendChild(ul);
+    var personal = el('section', 'ib-person');
+    personal.appendChild(el('h2', 'ib-h', 'Your address'));
+    var addressForm = el('form', 'ib-rule-form');
+    var addressName = el('input', 'ib-input'); addressName.placeholder = 'name'; addressName.required = true; addressName.setAttribute('aria-label', 'New address name');
+    var addressDomain = el('select', 'ib-input'); addressDomain.setAttribute('aria-label', 'Address domain');
+    [{ domain: 'openvibe.email' }].concat(customDomains.filter(function (d) { return d.mx_verified; })).forEach(function (d) { var option = el('option', '', '@' + d.domain); option.value = d.domain; addressDomain.appendChild(option); });
+    var addressGo = el('button', 'ib-btn is-quiet', 'Create address'); addressGo.type = 'submit';
+    var addressNote = el('p', 'ib-quiet');
+    addressForm.appendChild(addressName); addressForm.appendChild(addressDomain); addressForm.appendChild(addressGo); addressForm.appendChild(addressNote);
+    addressForm.addEventListener('submit', function (event) {
+      event.preventDefault(); addressGo.disabled = true;
+      api('/api/v1/me/mail/person-addresses', { method: 'POST', body: { name: addressName.value, domain: addressDomain.value, kind: addressDomain.value !== 'openvibe.email' ? 'custom' : addresses.some(function (a) { return a.kind === 'name'; }) ? 'alias' : 'name' } })
+        .then(function () { return api('/api/v1/me/mail/addresses'); }).then(function (result) { addresses = result.addresses || []; return loadPersonControls(); }).then(function () { paintSide(); })
+        .catch(function (err) { addressGo.disabled = false; addressNote.textContent = err.message; });
+    });
+    personal.appendChild(addressForm);
+    personal.appendChild(el('h2', 'ib-h', 'Custom domains (' + customDomains.length + ')'));
+    customDomains.forEach(function (domain) {
+      var card = el('div', 'ib-person-domain'); card.appendChild(el('strong', '', domain.domain + ' · ' + domain.status.replace(/_/g, ' ')));
+      var records = el('pre', 'ib-dns', JSON.stringify(domain.dns, null, 2)); card.appendChild(records);
+      var verify = el('button', 'ib-btn is-quiet', 'Check DNS'); verify.type = 'button';
+      verify.addEventListener('click', function () { verify.disabled = true; api('/api/v1/me/mail/custom-domains/' + encodeURIComponent(domain.domain) + '/verify', { method: 'POST' }).then(loadPersonControls).then(paintSide).catch(function (err) { verify.disabled = false; card.appendChild(el('p', 'ib-problem', err.message)); }); });
+      card.appendChild(verify); personal.appendChild(card);
+    });
+    var domainForm = el('form', 'ib-rule-form');
+    var domainName = el('input', 'ib-input'); domainName.placeholder = 'example.com'; domainName.setAttribute('aria-label', 'Custom domain'); domainName.required = true;
+    var domainGo = el('button', 'ib-btn is-quiet', 'Add domain'); domainGo.type = 'submit';
+    var domainNote = el('p', 'ib-quiet');
+    domainForm.appendChild(domainName); domainForm.appendChild(domainGo); domainForm.appendChild(domainNote);
+    domainForm.addEventListener('submit', function (event) { event.preventDefault(); domainGo.disabled = true; api('/api/v1/me/mail/custom-domains', { method: 'POST', body: { domain: domainName.value } }).then(loadPersonControls).then(paintSide).catch(function (err) { domainGo.disabled = false; domainNote.textContent = err.message; }); });
+    personal.appendChild(domainForm);
+    personal.appendChild(el('h2', 'ib-h', 'Forwarding (' + forwards.length + ')'));
+    personal.appendChild(el('p', 'ib-quiet', 'Add and verify your other address on your Network account first. A copy stays in this inbox.'));
+    forwards.forEach(function (rule) {
+      var line = el('div', 'ib-forward'); line.appendChild(el('span', '', (rule.source_address || 'All mail') + ' → ' + rule.target_address));
+      var remove = el('button', 'ib-btn is-quiet', 'Remove'); remove.type = 'button';
+      remove.addEventListener('click', function () { remove.disabled = true; api('/api/v1/me/mail/forwards/' + encodeURIComponent(rule.id), { method: 'DELETE' }).then(loadPersonControls).then(paintSide).catch(function () { remove.disabled = false; }); });
+      line.appendChild(remove); personal.appendChild(line);
+    });
+    var forwardForm = el('form', 'ib-rule-form');
+    var forwardSource = el('select', 'ib-input'); forwardSource.setAttribute('aria-label', 'Forward mail sent to');
+    [{ address: 'all' }].concat(addresses).forEach(function (a) { var option = el('option', '', a.address === 'all' ? 'All mail' : a.address); option.value = a.address; forwardSource.appendChild(option); });
+    var forwardTarget = el('input', 'ib-input'); forwardTarget.type = 'email'; forwardTarget.placeholder = 'you@gmail.com'; forwardTarget.required = true; forwardTarget.setAttribute('aria-label', 'Verified forwarding email');
+    var forwardGo = el('button', 'ib-btn is-quiet', 'Add forwarding'); forwardGo.type = 'submit';
+    var forwardNote = el('p', 'ib-quiet');
+    forwardForm.appendChild(forwardSource); forwardForm.appendChild(forwardTarget); forwardForm.appendChild(forwardGo); forwardForm.appendChild(forwardNote);
+    forwardForm.addEventListener('submit', function (event) { event.preventDefault(); forwardGo.disabled = true; api('/api/v1/me/mail/forwards', { method: 'POST', body: { source: forwardSource.value, target: forwardTarget.value } }).then(loadPersonControls).then(paintSide).catch(function (err) { forwardGo.disabled = false; forwardNote.textContent = err.message; }); });
+    personal.appendChild(forwardForm);
+    side.appendChild(personal);
     var aiBox = el('section', 'ib-ai-settings');
     aiBox.id = 'inbox-ai';   // openvibe.my's Receipts card links here to turn Inbox AI on
     aiBox.appendChild(el('h2', 'ib-h', 'Inbox AI (' + (aiEnabled ? '1 enabled' : '0 enabled') + ')'));
@@ -337,7 +386,7 @@
     readEl.textContent = '';
     readEl.appendChild(el('p', 'ib-quiet', 'Opening…'));
     showRead(true);
-    try { history.pushState({ mail: id }, '', '/inbox/' + encodeURIComponent(id)); } catch (e) { /* old browser */ }
+    try { if (location.pathname !== '/inbox/' + encodeURIComponent(id)) history.pushState({ mail: id }, '', '/inbox/' + encodeURIComponent(id)); } catch (e) { /* old browser */ }
     api('/api/v1/me/mail/messages/' + encodeURIComponent(id) + (images ? '?images=1' : '')).then(function (b) {
       var m = b.message || {};
       paintMessage(m, images);
@@ -385,7 +434,7 @@
     head.appendChild(meta);
     readEl.appendChild(head);
     var thread = el('details', 'ib-thread'); var summary = el('summary', '', 'Conversation'); thread.appendChild(summary); readEl.appendChild(thread);
-    api('/api/v1/me/mail/workspace/threads/' + encodeURIComponent(m.thread_id || m.id)).then(function (result) { summary.textContent = 'Conversation (' + result.ids.length + ')'; result.ids.forEach(function (id,i) { var b = el('button','ib-btn is-quiet',id === m.id ? 'Current message' : 'Message ' + (i+1)); b.onclick = function () { openMessage(id,false); }; thread.appendChild(b); }); }).catch(function () { summary.textContent = 'Conversation unavailable'; });
+    api('/api/v1/me/mail/workspace/threads/' + encodeURIComponent(m.thread_id || m.id)).then(function (result) { summary.textContent = 'Conversation (' + (result.ids.length + (result.sent || []).length) + ')'; (result.sent || []).forEach(function (sent) { var outgoing = el('details'); outgoing.appendChild(el('summary','','Sent · ' + new Date(sent.send_at).toLocaleString())); outgoing.appendChild(el('p','ib-text',sent.text)); thread.appendChild(outgoing); }); result.ids.forEach(function (id,i) { var b = el('button','ib-btn is-quiet',id === m.id ? 'Current message' : 'Message ' + (i+1)); b.onclick = function () { openMessage(id,false); }; thread.appendChild(b); }); }).catch(function () { summary.textContent = 'Conversation unavailable'; });
     if (m.blocked_images > 0 && !images) {
       var note = el('p', 'ib-images');
       note.appendChild(document.createTextNode(m.blocked_images + ' remote image' + (m.blocked_images === 1 ? ' is' : 's are') + ' off, so the sender cannot see that you opened this. '));
@@ -465,7 +514,7 @@
     var toolbar = el('header','ib-toolbar');
     var title = el('h1','','Mail'); toolbar.appendChild(title);
     var newMessage = el('button','ib-btn','Compose'); newMessage.onclick = function () { compose(); }; toolbar.appendChild(newMessage);
-    var settings = el('a','ib-btn is-quiet','Settings'); settings.href = '/inbox/settings'; toolbar.appendChild(settings);
+    var settings = el('a','ib-btn is-quiet','Settings'); settings.href = '/inbox/settings'; toolbar.appendChild(settings); var helpButton = el('button','ib-btn is-quiet','?'); helpButton.setAttribute('aria-label','Keyboard shortcuts and gestures'); helpButton.onclick = function () { notice('c compose · / search · r reply · e archive · j/k next/previous · Esc back · Ctrl/⌘ Enter send. Swipe a message to archive.'); }; toolbar.appendChild(helpButton);
     var form = el('form','ib-search'); var searchInput = el('input','ib-input'); searchInput.type = 'search'; searchInput.placeholder = 'Search mail'; searchInput.setAttribute('aria-label','Search mail');
     var help = el('p','ib-search-help','from: to: subject: "words" has:attachment after:2026-01-01 before:2026-12-31 · dates use UTC'); help.id = 'search-help'; searchInput.setAttribute('aria-describedby',help.id);
     var go = el('button','ib-btn is-quiet','Search'); go.type = 'submit'; form.appendChild(searchInput); form.appendChild(go);
@@ -508,7 +557,7 @@
       var messages = result.messages.filter(function (m) { return folder === 'sent' ? m.state === 'sent' : ['queued','sending','failed','uncertain'].includes(m.state); });
       if (!messages.length) listEl.appendChild(el('p','ib-quiet','No messages here.'));
       messages.forEach(function (m) { var item = el('article','ib-outbox-item'); var open = el('button','ib-row',m.subject || '(no subject)'); item.appendChild(open); item.appendChild(el('p','ib-quiet',m.state + ' · ' + new Date(m.send_at).toLocaleString()));
-        open.onclick = function () { api('/api/v1/me/mail/workspace/outbox/' + m.id).then(function (b) { readEl.textContent = ''; var back = el('button','ib-btn is-quiet','← Mail'); back.onclick = function () { showRead(false); }; readEl.appendChild(back); readEl.appendChild(el('h2','ib-subject',b.payload.subject)); readEl.appendChild(el('p','ib-meta','From ' + b.payload.from + ' · To ' + b.payload.to.join(', '))); readEl.appendChild(el('pre','ib-text',b.payload.text)); (b.payload.attachments || []).forEach(function (a) { var p = el('button','ib-btn is-quiet',a.name); p.onclick = function () { window.MailCompose.preview(window.MailCompose.toFile(a)); }; readEl.appendChild(p); }); (b.outcomes || []).forEach(function (o) { readEl.appendChild(el('p','ib-quiet',o.to + ': ' + o.state)); }); showRead(true); }).catch(function (err) { notice(err.message); }); };
+        open.onclick = function () { api('/api/v1/me/mail/workspace/outbox/' + m.id).then(function (b) { readEl.textContent = ''; var back = el('button','ib-btn is-quiet','← Mail'); back.onclick = function () { showRead(false); }; readEl.appendChild(back); readEl.appendChild(el('h2','ib-subject',b.payload.subject)); readEl.appendChild(el('p','ib-meta','From ' + b.payload.from + ' · To ' + b.payload.to.join(', '))); readEl.appendChild(el('pre','ib-text',b.payload.text)); (b.payload.attachments || []).forEach(function (a) { var p = el('button','ib-btn is-quiet',a.name); p.onclick = function () { window.MailCompose.preview(window.MailCompose.toFile(a)); }; readEl.appendChild(p); }); (b.outcomes || []).forEach(function (o) { readEl.appendChild(el('p','ib-quiet',(o.to || 'Send') + ': ' + (o.status || o.state) + (o.reason ? ' · ' + o.reason : ''))); }); showRead(true); }).catch(function (err) { notice(err.message); }); };
         if (m.state === 'queued') { var cancel = el('button','ib-btn is-quiet','Cancel and edit'); cancel.onclick = function () { api('/api/v1/me/mail/workspace/outbox/' + m.id + '/cancel',{ method:'POST' }).then(function (b) { compose(b.payload); loadOutbox(); }).catch(function (err) { notice(err.message); }); }; item.appendChild(cancel); }
         if (m.state === 'uncertain' || m.state === 'failed') item.appendChild(el('p','ib-problem','Open for recipient outcomes. Delivery is not retried automatically.'));
         listEl.appendChild(item);
@@ -532,6 +581,7 @@
     paintToolbar();
     paintSide();
     api('/api/v1/me/mail/workspace/settings').then(function (b) { workspace = b; if (settingsPage) paintSide(); else paintFolders(); }).catch(function (err) { notice(err.message); });
+    if (settingsPage) loadPersonControls().then(paintSide).catch(function () {});
     loadAiControls().then(function () {
       paintSide();
       // A link from openvibe.my's Receipts card to #inbox-ai lands on the switch, which only exists after this paint.
@@ -542,6 +592,9 @@
       }
     }).catch(function () {});
     loadList();
+  }
+  function loadPersonControls() {
+    return Promise.all([api('/api/v1/me/mail/custom-domains'),api('/api/v1/me/mail/forwards'),api('/api/v1/me/mail/workspace/settings')]).then(function (results) { customDomains = results[0].domains || []; forwards = results[1].forwards || []; workspace = results[2]; });
   }
   function loadAiControls() {
     return Promise.all([api('/api/v1/me/mail/ai-settings'), api('/api/v1/me/mail/ai-rules'), api('/api/v1/me/mail/ai-journal'), api('/api/v1/me/mail/imap-mailboxes')])

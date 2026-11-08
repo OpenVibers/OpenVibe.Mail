@@ -5,6 +5,7 @@ const { searchFilter, labelKeyword } = require('../domain/mail-search');
 const { mailboxAddressFor } = require('../domain/mailboxes');
 const BASE = '/api/v1/me/mail/workspace';
 function mountWorkspace(router, { db, stalwart, config, principal, wrap, fail, ownerOf }) {
+    const humanOnly = (req,res,next) => req.principal?.kind === 'user' ? next() : fail(req,res,403,'mail.person_required','Sign in as the account owner to send mail.');
     const read = principal.requirePerson(principal.CAPABILITIES.read);
     const write = principal.requirePerson(principal.CAPABILITIES.write);
     const invalid = (req, res, err) => fail(req,res,422,'mail.workspace.invalid',err.message);
@@ -20,7 +21,7 @@ function mountWorkspace(router, { db, stalwart, config, principal, wrap, fail, o
         await db.exec(sql`INSERT INTO mail_address_signatures(owner_subject,address,signature) VALUES(${ownerOf(req)},${address},${signature}) ON CONFLICT(owner_subject,address) DO UPDATE SET signature=EXCLUDED.signature`);
         res.json({ saved: true });
     }));
-    router.post(BASE + '/send', write, wrap(async (req,res) => {
+    router.post(BASE + '/send', write, humanOnly, wrap(async (req,res) => {
         try { res.status(202).json(await compose.enqueue({ db,stalwart,config,owner:ownerOf(req),input:req.body })); }
         catch (err) { invalid(req,res,err); }
     }));
@@ -50,7 +51,8 @@ function mountWorkspace(router, { db, stalwart, config, principal, wrap, fail, o
     router.get(BASE + '/threads/:id', read, wrap(async (req,res) => {
         const mailbox = await mailboxAddressFor(db,ownerOf(req));
         const ids = mailbox ? await stalwart.readThread({ mailboxAddress:mailbox,id:req.params.id }) : [];
-        res.json({ ids });
+        const sent = await db.many(sql`SELECT id,payload->>'text' AS text,payload->>'subject' AS subject,send_at FROM mail_compose_outbox WHERE owner_subject=${ownerOf(req)} AND state='sent' AND payload->>'thread_id'=${req.params.id} ORDER BY send_at`);
+        res.json({ ids,sent });
     }));
     router.put(BASE + '/messages/:id', write, wrap(async (req,res) => {
         const owner = ownerOf(req), id = req.params.id;
