@@ -68,6 +68,7 @@ async function senderAllowed(db, owner, address) {
     const mailbox = await mailboxAddressFor(db, owner);
     if (address === mailbox) return true;
     return Boolean(await db.maybe(sql`SELECT 1 AS ok FROM mail_person_addresses p LEFT JOIN mail_custom_domains d ON d.domain=split_part(p.address,'@',2)
+        AND d.owner_subject=p.owner_subject AND d.ownership_verified_at IS NOT NULL
         WHERE p.owner_subject=${owner} AND p.address=${address} AND p.enabled=true AND (p.kind<>'custom' OR d.dkim_verified_at IS NOT NULL)`));
 }
 

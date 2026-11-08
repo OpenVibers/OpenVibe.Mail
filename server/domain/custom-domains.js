@@ -16,12 +16,10 @@ async function add({ db, config, owner, domain: raw }) {
     if (domain === config.addresses.base || domain.endsWith(`.${config.addresses.base}`) || config.addresses.burners.includes(domain)) throw new Error('This domain belongs to OpenVibe.');
     const token = crypto.randomBytes(24).toString('hex');
     await db.tx((t) => ensureOwnerMailbox(t, { ownerSubject: owner, baseDomain: config.addresses.base }));
-    const inserted = await db.maybe(sql`INSERT INTO mail_custom_domains(domain,owner_subject,ownership_token) VALUES(${domain},${owner},${token})
-        ON CONFLICT DO NOTHING RETURNING domain`);
-    if (!inserted) {
-        const existing = await db.maybe(sql`SELECT owner_subject FROM mail_custom_domains WHERE domain=${domain}`);
-        if (!existing || existing.owner_subject !== owner) throw new Error('This domain is already claimed.');
-    }
+    const verified = await db.maybe(sql`SELECT owner_subject FROM mail_custom_domains WHERE domain=${domain} AND ownership_verified_at IS NOT NULL`);
+    if (verified && verified.owner_subject !== owner) throw new Error('This domain is already in use on OpenVibe.');
+    await db.exec(sql`INSERT INTO mail_custom_domains(domain,owner_subject,ownership_token) VALUES(${domain},${owner},${token})
+        ON CONFLICT (domain,owner_subject) DO NOTHING`);
     return get({ db, config, owner, domain });
 }
 
@@ -41,6 +39,8 @@ async function verify({ db, config, stalwart, owner, domain: raw, lookupTxt = dn
     const domain = validDomain(raw);
     const row = await db.maybe(sql`SELECT * FROM mail_custom_domains WHERE domain=${domain} AND owner_subject=${owner}`);
     if (!row) return null;
+    const verified = await db.maybe(sql`SELECT owner_subject FROM mail_custom_domains WHERE domain=${domain} AND ownership_verified_at IS NOT NULL`);
+    if (verified && verified.owner_subject !== owner) throw new Error('This domain is already in use on OpenVibe.');
     const ownership = (await txtValues(`_openvibe-mail.${domain}`, lookupTxt)).includes(row.ownership_token);
     const expected = new Set(config.inbound?.mx || []);
     const actualMx = await lookupMx(domain).catch(() => []);
@@ -60,9 +60,14 @@ async function verify({ db, config, stalwart, owner, domain: raw, lookupTxt = dn
             catch { /* provider status unavailable: do not enable sending */ }
         }
     }
-    await db.exec(sql`UPDATE mail_custom_domains SET ownership_verified_at=CASE WHEN ${ownership} THEN COALESCE(ownership_verified_at,now()) ELSE NULL END,
-        mx_verified_at=CASE WHEN ${ownership && mx} THEN COALESCE(mx_verified_at,now()) ELSE NULL END,
-        dkim_verified_at=CASE WHEN ${ownership && mx && dkim} THEN COALESCE(dkim_verified_at,now()) ELSE NULL END WHERE domain=${domain} AND owner_subject=${owner}`);
+    try {
+        await db.exec(sql`UPDATE mail_custom_domains SET ownership_verified_at=CASE WHEN ${ownership} THEN COALESCE(ownership_verified_at,now()) ELSE NULL END,
+            mx_verified_at=CASE WHEN ${ownership && mx} THEN COALESCE(mx_verified_at,now()) ELSE NULL END,
+            dkim_verified_at=CASE WHEN ${ownership && mx && dkim} THEN COALESCE(dkim_verified_at,now()) ELSE NULL END WHERE domain=${domain} AND owner_subject=${owner}`);
+    } catch (err) {
+        if (err.code === '23505' && err.constraint === 'mail_custom_domains_verified_domain') throw new Error('This domain is already in use on OpenVibe.');
+        throw err;
+    }
     if (ownership && mx && stalwart?.ensureDomain) await stalwart.ensureDomain(domain);
     return get({ db, config, owner, domain });
 }

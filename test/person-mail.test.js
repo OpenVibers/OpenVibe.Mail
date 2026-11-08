@@ -7,6 +7,7 @@ const person = require('../server/domain/person-mail');
 const domains = require('../server/domain/custom-domains');
 const providers = require('../server/domain/outbound-providers');
 const providerDomains = require('../server/domain/provider-domains');
+const { sql } = require('openvibe-sdk/db');
 
 test('daily allowance grows with trusted history and pauses on bounce or complaint rates', () => {
     const signals = { kind: 'account', email_verified: true, verified: true, account_age_hours: 90*24, account_age_days: 90 };
@@ -73,4 +74,46 @@ test('custom domain advances only after ownership, MX and DKIM are verified', as
     await providerDomains.save({ db: s.db, providerId: 'smtp_domain', input: { domain: 'alice.example', dkim_records: [{ type: 'TXT', name: 's1._domainkey.alice.example', value: 'v=DKIM1; p=test' }] } });
     checked = await domains.verify({ db: s.db, config: s.config, stalwart: { ensureDomain: async () => true }, owner: alice.subject, domain: 'alice.example', lookupTxt, lookupMx });
     assert.equal(checked.status, 'active', JSON.stringify(checked));
+});
+
+test('pending custom domains cannot squat on another owner or receive their mail', async (t) => {
+    const s = await boot({ env: { MAIL_CUSTOM_DOMAIN_MX: 'mail.openvibe.email' } });
+    t.after(() => s.close());
+    const alice = s.network.addUser('alice');
+    const bob = s.network.addUser('bob');
+    const claim = (owner, domain) => domains.add({ db: s.db, config: s.config, owner: owner.subject, domain });
+
+    const squatter = await claim(alice, 'gmail.com');
+    const other = await claim(bob, 'gmail.com');
+    assert.equal(squatter.status, 'pending_ownership');
+    assert.equal(other.status, 'pending_ownership');
+    assert.notEqual(squatter.dns.ownership.value, other.dns.ownership.value);
+
+    const first = await claim(alice, 'shared.example');
+    const second = await claim(bob, 'shared.example');
+    assert.notEqual(first.dns.ownership.value, second.dns.ownership.value);
+    assert.equal((await claim(alice, 'shared.example')).dns.ownership.value, first.dns.ownership.value);
+    assert.equal(await s.db.value('SELECT count(*)::int FROM mail_custom_domains WHERE domain=$1', ['shared.example']), 2);
+
+    // A stale or forged pending address must not enter Stalwart's inbound directory.
+    await s.db.exec(sql`INSERT INTO mail_person_addresses(address,owner_subject,kind) VALUES('bob@shared.example',${bob.subject},'custom')`);
+    assert.equal(await s.db.value('SELECT count(*)::int FROM mail_directory_accounts WHERE address=$1', ['bob@shared.example']), 0);
+
+    const dns = { lookupTxt: async () => [[first.dns.ownership.value], [second.dns.ownership.value]],
+        lookupMx: async () => [{ exchange: 'mail.openvibe.email', priority: 10 }] };
+    const verified = await domains.verify({ db: s.db, config: s.config, owner: alice.subject, domain: 'shared.example', ...dns });
+    assert.equal(verified.status, 'pending_dkim');
+    const address = await person.createAddress({ db: s.db, config: s.config, owner: alice.subject, local: 'alice', domain: 'shared.example', kind: 'custom' });
+    assert.equal(await s.db.value('SELECT owner FROM mail_directory_accounts WHERE address=$1', [address]), alice.subject);
+    assert.equal(await s.db.value('SELECT count(*)::int FROM mail_directory_accounts WHERE address=$1', ['bob@shared.example']), 0);
+
+    await assert.rejects(domains.verify({ db: s.db, config: s.config, owner: bob.subject, domain: 'shared.example', ...dns }),
+        { message: 'This domain is already in use on OpenVibe.' });
+    await assert.rejects(claim(bob, 'shared.example'), { message: 'This domain is already in use on OpenVibe.' });
+    await assert.rejects(s.db.exec(sql`UPDATE mail_custom_domains SET ownership_verified_at=now() WHERE domain='shared.example' AND owner_subject=${bob.subject}`),
+        (err) => err.code === '23505' && err.constraint === 'mail_custom_domains_verified_domain');
+    assert.equal(await s.db.value('SELECT owner_subject FROM mail_custom_domains WHERE domain=$1 AND ownership_verified_at IS NOT NULL', ['shared.example']), alice.subject);
+    await s.db.exec(sql`UPDATE mail_custom_domains SET dkim_verified_at=now() WHERE domain='shared.example' AND owner_subject=${alice.subject}`);
+    assert.equal(await person.senderAllowed(s.db, alice.subject, address), true);
+    assert.equal(await person.senderAllowed(s.db, bob.subject, 'bob@shared.example'), false);
 });
