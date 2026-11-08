@@ -36,6 +36,9 @@ async function runInboxAi({ db, stalwart, analyze, log = console, now = () => Da
                 if (!messages.has(threadId) && !message.spam) messages.set(threadId, message);
             }
             for (const [threadId, message] of messages) {
+                const stillConsented = await db.maybe(sql`SELECT 1 AS enabled FROM mail_inbox_ai_consent
+                    WHERE owner_subject = ${owner} AND enabled = true`);
+                if (!stillConsented) break;
                 const exists = await db.maybe(sql`SELECT 1 AS found FROM mail_inbox_ai_threads WHERE owner_subject = ${owner} AND thread_id = ${threadId}`);
                 if (exists) continue;
                 const full = await stalwart.readMessage({ mailboxAddress: mailbox, id: message.id });

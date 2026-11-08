@@ -97,3 +97,21 @@ test('rules are owner-scoped, journal category changes, and undo restores the pr
     assert.strictEqual(triage.body.threads[0].category, 'to_read');
     assert.ok((await s.get('/api/v1/me/mail/ai-journal', { as: alice })).body.entries[0].undone_at);
 });
+
+test('turning Inbox AI off during a batch stops the next model call', async (t) => {
+    const s = await boot();
+    t.after(() => s.close());
+    const alice = s.network.addUser('alice');
+    const made = await s.post('/api/v1/masks', { as: alice, json: { label: 'shop' } });
+    const mailbox = await s.db.value('SELECT address FROM mail_mailboxes WHERE owner_subject = $1', [alice.subject]);
+    for (const subject of ['First', 'Second']) s.mail.deliver({ mailboxAddress: mailbox, to: made.body.mask.address, from: 'shop@example.net', subject, text: subject });
+    await s.put('/api/v1/me/mail/ai-settings', { as: alice, json: { enabled: true } });
+    let calls = 0;
+    const result = await runInboxAi({ db: s.db, stalwart: s.mail, analyze: async () => {
+        calls++;
+        await s.db.exec(sql`UPDATE mail_inbox_ai_consent SET enabled = false WHERE owner_subject = ${alice.subject}`);
+        return { category: 'to_read', summary: 'A message' };
+    } });
+    assert.strictEqual(result.triaged, 1);
+    assert.strictEqual(calls, 1);
+});
