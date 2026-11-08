@@ -39,7 +39,7 @@ const answering = require('../domain/agent-answering');
 /** Whether this inbox answers mail (track HO6): off unless the person turned it on. */
 const agentInboxesAnswering = (db, owner, inbox) => answering.getAnswering({ db, owner, inbox });
 
-function createApi({ db, config, stalwart, events, principal, log = console }) {
+function createApi({ db, config, stalwart, events, principal, log = console, smtp = null }) {
     const router = express.Router();
     const requirePerson = principal.requirePerson;
 
@@ -278,7 +278,7 @@ function createApi({ db, config, stalwart, events, principal, log = console }) {
     }));
 
     // Reading your own mail (M1.5): server/http/reading-routes.js.
-    require('./reading-routes').mountReading(router, { db, stalwart, principal, wrap, fail, ownerOf });
+    require('./reading-routes').mountReading(router, { db, stalwart, config, smtp, principal, wrap, fail, ownerOf });
 
     return router;
 }

@@ -15,11 +15,12 @@ const { cleanHtml, downloadType, dispositionFor } = require('../domain/reading')
 const masks = require('../domain/masks');
 const agentInboxes = require('../domain/agent-inboxes');
 const { mailboxAddressFor } = require('../domain/mailboxes');
+const { sql } = require('openvibe-sdk/db');
 
 const ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 const PART_RE = /^[A-Za-z0-9._-]{1,64}$/;
 
-function mountReading(router, { db, stalwart, principal, wrap, fail, ownerOf }) {
+function mountReading(router, { db, stalwart, config, smtp, principal, wrap, fail, ownerOf }) {
     const requirePerson = principal.requirePerson;
     const read = requirePerson(principal.CAPABILITIES.read);
     const write = requirePerson(principal.CAPABILITIES.write);
@@ -42,6 +43,100 @@ function mountReading(router, { db, stalwart, principal, wrap, fail, ownerOf }) 
     router.get('/api/v1/me/mail/addresses', read, wrap(async (req, res) => {
         const { mailbox, list } = await addressesOf(ownerOf(req));
         return noStore(res).json({ mailbox, addresses: list });
+    }));
+
+    // Inbox AI is a mailbox-level opt-in. No row is equivalent to off for old and new accounts.
+    router.get('/api/v1/me/mail/ai-settings', read, wrap(async (req, res) => {
+        const owner = ownerOf(req);
+        const row = await db.maybe(sql`SELECT enabled, changed_at FROM mail_inbox_ai_consent WHERE owner_subject = ${owner}`);
+        return noStore(res).json({ enabled: !!(row && row.enabled), changed_at: row ? row.changed_at : null });
+    }));
+
+    router.put('/api/v1/me/mail/ai-settings', write, wrap(async (req, res) => {
+        if (!req.body || typeof req.body.enabled !== 'boolean') {
+            return fail(req, res, 400, 'mail.ai_settings.invalid', 'enabled must be true or false.');
+        }
+        const owner = ownerOf(req);
+        const mailbox = await mailboxAddressFor(db, owner);
+        if (!mailbox) return fail(req, res, 404, 'mail.not_found', 'Create your mailbox before changing its Inbox AI setting.');
+        const row = await db.maybe(sql`
+            INSERT INTO mail_inbox_ai_consent (owner_subject, enabled)
+            VALUES (${owner}, ${req.body.enabled})
+            ON CONFLICT (owner_subject) DO UPDATE SET enabled = EXCLUDED.enabled, changed_at = now()
+            RETURNING enabled, changed_at`);
+        return noStore(res).json({ enabled: row.enabled, changed_at: row.changed_at });
+    }));
+
+    router.get('/api/v1/me/mail/triage', read, wrap(async (req, res) => {
+        const owner = ownerOf(req);
+        const items = await db.many(sql`SELECT thread_id, message_id, category, summary, draft_to, draft_subject,
+            draft_body, draft_state, received_at FROM mail_inbox_ai_threads WHERE owner_subject = ${owner}
+            ORDER BY received_at DESC NULLS LAST LIMIT 200`);
+        const counts = Object.fromEntries(['needs_reply', 'to_read', 'receipts', 'newsletters', 'other'].map((category) =>
+            [category, items.filter((item) => item.category === category).length]));
+        return noStore(res).json({ counts, threads: items });
+    }));
+
+    router.get('/api/v1/me/mail/receipts', read, wrap(async (req, res) => {
+        const owner = ownerOf(req);
+        const receipts = await db.many(sql`SELECT thread_id, sender AS merchant, subject, summary, received_at
+            FROM mail_inbox_ai_threads WHERE owner_subject = ${owner} AND category = 'receipts'
+            ORDER BY received_at DESC NULLS LAST LIMIT 200`);
+        return noStore(res).json({ receipts });
+    }));
+
+    const rules = require('../domain/inbox-ai-rules');
+    router.get('/api/v1/me/mail/ai-rules', read, wrap(async (req, res) =>
+        noStore(res).json({ rules: await rules.listRules(db, ownerOf(req)) })));
+    router.post('/api/v1/me/mail/ai-rules', write, wrap(async (req, res) => {
+        const rule = await rules.createRule(db, ownerOf(req), req.body);
+        if (!rule) return fail(req, res, 422, 'mail.ai_rule.invalid', 'A name, sender or subject match, and category are required.');
+        return noStore(res).status(201).json({ rule });
+    }));
+    router.put('/api/v1/me/mail/ai-rules/:id', write, wrap(async (req, res) => {
+        const rule = await rules.updateRule(db, ownerOf(req), String(req.params.id), req.body);
+        if (!rule) return fail(req, res, 404, 'mail.ai_rule.not_found', 'That rule is not available.');
+        return noStore(res).json({ rule });
+    }));
+    router.delete('/api/v1/me/mail/ai-rules/:id', write, wrap(async (req, res) => {
+        const rows = await db.many(sql`DELETE FROM mail_inbox_ai_rules WHERE owner_subject = ${ownerOf(req)} AND id = ${String(req.params.id)} RETURNING id`);
+        if (!rows.length) return fail(req, res, 404, 'mail.ai_rule.not_found', 'That rule is not available.');
+        return noStore(res).json({ id: rows[0].id, deleted: true });
+    }));
+    router.get('/api/v1/me/mail/ai-journal', read, wrap(async (req, res) => {
+        const entries = await db.many(sql`SELECT id, rule_id, rule_name, thread_id, previous_category, action_category, created_at, undone_at
+            FROM mail_inbox_ai_journal WHERE owner_subject = ${ownerOf(req)} ORDER BY created_at DESC LIMIT 200`);
+        return noStore(res).json({ entries });
+    }));
+    router.post('/api/v1/me/mail/ai-journal/:id/undo', write, wrap(async (req, res) => {
+        const result = await rules.undo(db, ownerOf(req), String(req.params.id));
+        if (!result.ok) return fail(req, res, result.conflict ? 409 : 404, result.conflict ? 'mail.ai_journal.conflict' : 'mail.ai_journal.not_found',
+            result.conflict ? 'This thread changed after the rule action, so it was not undone.' : 'That journal entry is not available.');
+        return noStore(res).json(result);
+    }));
+
+    router.put('/api/v1/me/mail/triage/:threadId/draft', write, wrap(async (req, res) => {
+        const threadId = String(req.params.threadId || '');
+        const body = String(req.body && req.body.body || '');
+        const subject = String(req.body && req.body.subject || '');
+        if (!ID_RE.test(threadId) || !body.trim() || body.length > 10000 || subject.length > 2000 || /[\r\n\u0000]/.test(subject)) {
+            return fail(req, res, 422, 'mail.ai_draft.invalid', 'The draft needs a valid thread, subject and body.');
+        }
+        const row = await db.maybe(sql`UPDATE mail_inbox_ai_threads SET draft_body = ${body}, draft_subject = ${subject}, updated_at = now()
+            WHERE owner_subject = ${ownerOf(req)} AND thread_id = ${threadId} AND category = 'needs_reply' AND draft_state = 'draft'
+            RETURNING thread_id, draft_to, draft_subject, draft_body, draft_state`);
+        if (!row) return fail(req, res, 404, 'mail.ai_draft.not_found', 'That draft is not available.');
+        return noStore(res).json({ draft: row });
+    }));
+
+    router.post('/api/v1/me/mail/triage/:threadId/send', write, wrap(async (req, res) => {
+        const threadId = String(req.params.threadId || '');
+        if (!ID_RE.test(threadId)) return fail(req, res, 404, 'mail.ai_draft.not_found', 'That draft is not available.');
+        const { sendInboxDraft } = require('../domain/inbox-ai-send');
+        const result = await sendInboxDraft({ db, config, stalwart, smtp, owner: ownerOf(req), threadId,
+            body: req.body && req.body.body, subject: req.body && req.body.subject });
+        if (result.status !== 200) return fail(req, res, result.status, result.code, result.detail || 'The draft was not sent.');
+        return noStore(res).json(result);
     }));
 
     router.get('/api/v1/me/mail/messages', read, wrap(async (req, res) => {

@@ -122,7 +122,7 @@ function createFakeStalwart() {
             const refs = [...String(valueOf('references')).matchAll(/<([^<>\s]{1,995})>/g)].map((x) => x[1]).slice(0, 100);
             const stamp = headers.find((h) => String(h && h.name || '').toLowerCase() === 'delivered-to');
             return {
-                id: m.id, from: m.from.map((a) => a.email), to: m.to.map((a) => a.email), cc: [], subject: m.subject, date: m.receivedAt, unread: !m.seen,
+                id: m.id, threadId: m.threadId || m.id, from: m.from.map((a) => a.email), to: m.to.map((a) => a.email), cc: [], subject: m.subject, date: m.receivedAt, unread: !m.seen,
                 spam: Boolean(m.spam),
                 deliveredTo: stamp ? String(stamp.value || '').trim().toLowerCase() : null,
                 threadHeaders: { messageId: idOf(valueOf('message-id')), inReplyTo: idOf(valueOf('in-reply-to')), references: refs },

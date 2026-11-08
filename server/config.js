@@ -93,6 +93,13 @@ function load(overrides = null) {
             redirectUri: env.OV_OAUTH_REDIRECT_URI || `${baseUrl}/auth/callback`,
             scope: env.OV_OAUTH_SCOPE || 'profile',
         },
+        ai: {
+            url: String(env.OV_AI_URL || 'https://ai.openvibe.services').replace(/\/+$/, ''),
+            clientId: env.OV_OAUTH_CLIENT_ID || 'mail',
+            clientSecret: env.OV_OAUTH_CLIENT_SECRET || '',
+            timeoutMs: int('MAIL_AI_TIMEOUT_MS', 180_000),
+            waitMs: int('MAIL_AI_WAIT_MS', 120_000),
+        },
         cookies: {
             secure: env.COOKIE_SECURE ? env.COOKIE_SECURE === 'true' : isProduction,
         },
@@ -164,6 +171,7 @@ function load(overrides = null) {
 
         jobs: {
             purgeIntervalMs: int('MAIL_PURGE_INTERVAL_MS', 60_000),
+            inboxAiIntervalMs: int('MAIL_INBOX_AI_INTERVAL_MS', 60_000),
         },
     };
 }
