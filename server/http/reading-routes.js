@@ -77,12 +77,17 @@ function mountReading(router, { db, stalwart, config, smtp, principal, wrap, fai
         return noStore(res).json({ counts, threads: items });
     }));
 
+    // The read-only handoff for openvibe.my's Receipts card. `enabled` says whether Inbox AI is on for this mailbox:
+    // with it off the card asks the person to turn it on instead of showing triage rows kept from when it was on.
+    // The opt-in is checked here, as it is immediately before every model call.
     router.get('/api/v1/me/mail/receipts', read, wrap(async (req, res) => {
         const owner = ownerOf(req);
-        const receipts = await db.many(sql`SELECT thread_id, sender AS merchant, subject, summary, received_at
+        const consent = await db.maybe(sql`SELECT enabled FROM mail_inbox_ai_consent WHERE owner_subject = ${owner}`);
+        const enabled = !!(consent && consent.enabled);
+        const receipts = enabled ? await db.many(sql`SELECT thread_id, message_id, sender AS merchant, subject, summary, received_at
             FROM mail_inbox_ai_threads WHERE owner_subject = ${owner} AND category = 'receipts'
-            ORDER BY received_at DESC NULLS LAST LIMIT 200`);
-        return noStore(res).json({ receipts });
+            ORDER BY received_at DESC NULLS LAST LIMIT 200`) : [];
+        return noStore(res).json({ enabled, receipts });
     }));
 
     const rules = require('../domain/inbox-ai-rules');
