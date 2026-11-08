@@ -25,8 +25,10 @@ informed; do not test against production mailboxes that are not yours.
 
 ## Out of scope for M1
 
-Sending, DKIM signing, inbox AI, paid custom domains and the public web UI are later phases. A report that a
-receive-only domain has no SPF sending path is not a vulnerability; `v=spf1 -all` is deliberate.
+Inbox AI is opt-in, uses OpenVibe.AI's private tier with the owner's allowance, and stores generated summaries and
+drafts. Replies require an explicit send action and follow the existing outbound relay gate. DKIM signing and paid
+custom domains remain later phases. A report that a receive-only domain has no SPF sending path is not a
+vulnerability; `v=spf1 -all` is deliberate.
 
 ## Secrets in the repository
 

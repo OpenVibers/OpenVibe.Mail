@@ -77,6 +77,44 @@ function mountReading(router, { db, stalwart, config, smtp, principal, wrap, fai
         return noStore(res).json({ counts, threads: items });
     }));
 
+    router.get('/api/v1/me/mail/receipts', read, wrap(async (req, res) => {
+        const owner = ownerOf(req);
+        const receipts = await db.many(sql`SELECT thread_id, sender AS merchant, subject, summary, received_at
+            FROM mail_inbox_ai_threads WHERE owner_subject = ${owner} AND category = 'receipts'
+            ORDER BY received_at DESC NULLS LAST LIMIT 200`);
+        return noStore(res).json({ receipts });
+    }));
+
+    const rules = require('../domain/inbox-ai-rules');
+    router.get('/api/v1/me/mail/ai-rules', read, wrap(async (req, res) =>
+        noStore(res).json({ rules: await rules.listRules(db, ownerOf(req)) })));
+    router.post('/api/v1/me/mail/ai-rules', write, wrap(async (req, res) => {
+        const rule = await rules.createRule(db, ownerOf(req), req.body);
+        if (!rule) return fail(req, res, 422, 'mail.ai_rule.invalid', 'A name, sender or subject match, and category are required.');
+        return noStore(res).status(201).json({ rule });
+    }));
+    router.put('/api/v1/me/mail/ai-rules/:id', write, wrap(async (req, res) => {
+        const rule = await rules.updateRule(db, ownerOf(req), String(req.params.id), req.body);
+        if (!rule) return fail(req, res, 404, 'mail.ai_rule.not_found', 'That rule is not available.');
+        return noStore(res).json({ rule });
+    }));
+    router.delete('/api/v1/me/mail/ai-rules/:id', write, wrap(async (req, res) => {
+        const rows = await db.many(sql`DELETE FROM mail_inbox_ai_rules WHERE owner_subject = ${ownerOf(req)} AND id = ${String(req.params.id)} RETURNING id`);
+        if (!rows.length) return fail(req, res, 404, 'mail.ai_rule.not_found', 'That rule is not available.');
+        return noStore(res).json({ id: rows[0].id, deleted: true });
+    }));
+    router.get('/api/v1/me/mail/ai-journal', read, wrap(async (req, res) => {
+        const entries = await db.many(sql`SELECT id, rule_id, rule_name, thread_id, previous_category, action_category, created_at, undone_at
+            FROM mail_inbox_ai_journal WHERE owner_subject = ${ownerOf(req)} ORDER BY created_at DESC LIMIT 200`);
+        return noStore(res).json({ entries });
+    }));
+    router.post('/api/v1/me/mail/ai-journal/:id/undo', write, wrap(async (req, res) => {
+        const result = await rules.undo(db, ownerOf(req), String(req.params.id));
+        if (!result.ok) return fail(req, res, result.conflict ? 409 : 404, result.conflict ? 'mail.ai_journal.conflict' : 'mail.ai_journal.not_found',
+            result.conflict ? 'This thread changed after the rule action, so it was not undone.' : 'That journal entry is not available.');
+        return noStore(res).json(result);
+    }));
+
     router.put('/api/v1/me/mail/triage/:threadId/draft', write, wrap(async (req, res) => {
         const threadId = String(req.params.threadId || '');
         const body = String(req.body && req.body.body || '');

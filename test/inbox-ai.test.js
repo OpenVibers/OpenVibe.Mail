@@ -68,3 +68,32 @@ test('batch triage is consent gated and stores one validated result per thread',
     assert.strictEqual(sends, 1, 'only the explicit send action calls SMTP');
     assert.ok(!s.logs().some((line) => line.includes('marker private body')));
 });
+
+test('rules are owner-scoped, journal category changes, and undo restores the prior triage', async (t) => {
+    const s = await boot();
+    t.after(() => s.close());
+    const alice = s.network.addUser('alice');
+    const bob = s.network.addUser('bob');
+    const made = await s.post('/api/v1/masks', { as: alice, json: { label: 'shop' } });
+    const mailbox = await s.db.value('SELECT address FROM mail_mailboxes WHERE owner_subject = $1', [alice.subject]);
+    s.mail.deliver({ mailboxAddress: mailbox, to: made.body.mask.address, from: 'seller@openvibe.email', subject: 'Your order', text: 'Receipt body' });
+    await s.put('/api/v1/me/mail/ai-settings', { as: alice, json: { enabled: true } });
+    const created = await s.post('/api/v1/me/mail/ai-rules', { as: alice, json: {
+        name: 'Shop receipts', match_from: 'seller@openvibe.email', category: 'receipts', enabled: true,
+    } });
+    assert.strictEqual(created.status, 201);
+    assert.strictEqual((await s.get('/api/v1/me/mail/ai-rules', { as: bob })).body.rules.length, 0);
+    const report = await runInboxAi({ db: s.db, stalwart: s.mail, analyze: async () => ({ category: 'to_read', summary: 'Order receipt' }) });
+    assert.strictEqual(report.triaged, 1);
+    const receipts = await s.get('/api/v1/me/mail/receipts', { as: alice });
+    assert.strictEqual(receipts.body.receipts.length, 1);
+    assert.strictEqual(receipts.body.receipts[0].merchant, 'seller@openvibe.email');
+    const journal = await s.get('/api/v1/me/mail/ai-journal', { as: alice });
+    assert.strictEqual(journal.body.entries.length, 1);
+    assert.strictEqual(journal.body.entries[0].previous_category, 'to_read');
+    const undone = await s.post(`/api/v1/me/mail/ai-journal/${journal.body.entries[0].id}/undo`, { as: alice });
+    assert.strictEqual(undone.status, 200);
+    const triage = await s.get('/api/v1/me/mail/triage', { as: alice });
+    assert.strictEqual(triage.body.threads[0].category, 'to_read');
+    assert.ok((await s.get('/api/v1/me/mail/ai-journal', { as: alice })).body.entries[0].undone_at);
+});

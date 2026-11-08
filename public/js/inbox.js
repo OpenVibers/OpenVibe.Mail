@@ -20,7 +20,7 @@
   var listEl = root.querySelector('[data-mail-list]');
   var readEl = root.querySelector('[data-mail-read]');
   var addresses = Array.isArray(data.addresses) ? data.addresses : [];
-  var current = 'all', cursor = null, rows = [], openId = null, loading = false, aiEnabled = false, triageThreads = [];
+  var current = 'all', cursor = null, rows = [], openId = null, loading = false, aiEnabled = false, triageThreads = [], aiRules = [], aiJournal = [];
   var KIND = { mailbox: 'Your mailbox', mask: 'Mask', agent: 'Agent inbox', burner: 'Burner' };
 
   function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
@@ -88,6 +88,51 @@
     var aiCopy = el('p', 'ib-quiet', aiEnabled ? 'On · uses your OpenVibe.AI allowance. Drafts wait for your click.' : 'Off · your mail is not sent for AI triage.');
     aiBox.appendChild(aiCopy);
     side.appendChild(aiBox);
+    var rulesBox = el('section', 'ib-ai-rules');
+    rulesBox.appendChild(el('h2', 'ib-h', 'Rules'));
+    function ruleForm(rule) {
+      var form = el('form', 'ib-rule-form');
+      var name = el('input', 'ib-input'); name.placeholder = 'Rule name'; name.value = rule.name || ''; name.setAttribute('aria-label', 'Rule name');
+      var from = el('input', 'ib-input'); from.placeholder = 'Sender email (optional)'; from.value = rule.match_from || ''; from.setAttribute('aria-label', 'Match sender email');
+      var subjectMatch = el('input', 'ib-input'); subjectMatch.placeholder = 'Subject contains (optional)'; subjectMatch.value = rule.match_subject || ''; subjectMatch.setAttribute('aria-label', 'Match subject text');
+      var category = el('select', 'ib-input'); category.setAttribute('aria-label', 'Move matching threads to');
+      [['needs_reply','Needs a reply'],['to_read','To read'],['receipts','Receipts'],['newsletters','Newsletters'],['other','The rest']].forEach(function (entry) {
+        var option = el('option', '', entry[1]); option.value = entry[0]; option.selected = rule.category === entry[0]; category.appendChild(option);
+      });
+      var enabled = el('input'); enabled.type = 'checkbox'; enabled.checked = rule.enabled !== false;
+      var enabledLabel = el('label', 'ib-rule-enabled'); enabledLabel.appendChild(enabled); enabledLabel.appendChild(document.createTextNode(' Enabled'));
+      var save = el('button', 'ib-btn is-quiet', rule.id ? 'Save rule' : 'Add rule'); save.type = 'submit';
+      form.appendChild(name); form.appendChild(from); form.appendChild(subjectMatch); form.appendChild(category); form.appendChild(enabledLabel); form.appendChild(save);
+      form.addEventListener('submit', function (event) {
+        event.preventDefault(); save.disabled = true;
+        var value = { name: name.value, match_from: from.value, match_subject: subjectMatch.value, category: category.value, enabled: enabled.checked };
+        api('/api/v1/me/mail/ai-rules' + (rule.id ? '/' + encodeURIComponent(rule.id) : ''), { method: rule.id ? 'PUT' : 'POST', body: value })
+          .then(function () { return api('/api/v1/me/mail/ai-rules'); }).then(function (result) { aiRules = result.rules || []; paintSide(); })
+          .catch(function (err) { save.disabled = false; save.textContent = 'Could not save: ' + err.message; });
+      });
+      if (rule.id) {
+        var remove = el('button', 'ib-btn is-quiet', 'Delete'); remove.type = 'button';
+        remove.addEventListener('click', function () { remove.disabled = true; api('/api/v1/me/mail/ai-rules/' + encodeURIComponent(rule.id), { method: 'DELETE' }).then(function () { aiRules = aiRules.filter(function (r) { return r.id !== rule.id; }); paintSide(); }).catch(function () { remove.disabled = false; }); });
+        form.appendChild(remove);
+      }
+      return form;
+    }
+    aiRules.forEach(function (rule) { rulesBox.appendChild(ruleForm(rule)); });
+    rulesBox.appendChild(ruleForm({ category: 'other', enabled: true }));
+    side.appendChild(rulesBox);
+    var journalBox = el('section', 'ib-ai-journal');
+    journalBox.appendChild(el('h2', 'ib-h', 'Rule journal'));
+    aiJournal.forEach(function (entry) {
+      var line = el('div', 'ib-journal-entry');
+      line.appendChild(el('span', '', entry.rule_name + ' moved a thread to ' + entry.action_category.replace('_', ' ')));
+      if (!entry.undone_at) {
+        var undo = el('button', 'ib-btn is-quiet', 'Undo'); undo.type = 'button';
+        undo.addEventListener('click', function () { undo.disabled = true; api('/api/v1/me/mail/ai-journal/' + encodeURIComponent(entry.id) + '/undo', { method: 'POST' }).then(function () { return loadAiControls(); }).then(paintSide).catch(function () { undo.disabled = false; }); });
+        line.appendChild(undo);
+      } else line.appendChild(el('span', 'ib-quiet', 'Undone'));
+      journalBox.appendChild(line);
+    });
+    side.appendChild(journalBox);
     // New mask: one line, for one site.
     var form = el('form', 'ib-newmask');
     var input = el('input', 'ib-input');
@@ -335,8 +380,12 @@
   // The addresses come from the API when the shell does not carry them.
   function begin() {
     paintSide();
-    api('/api/v1/me/mail/ai-settings').then(function (state) { aiEnabled = !!state.enabled; paintSide(); }).catch(function () {});
+    loadAiControls().then(paintSide).catch(function () {});
     loadList();
+  }
+  function loadAiControls() {
+    return Promise.all([api('/api/v1/me/mail/ai-settings'), api('/api/v1/me/mail/ai-rules'), api('/api/v1/me/mail/ai-journal')])
+      .then(function (results) { aiEnabled = !!results[0].enabled; aiRules = results[1].rules || []; aiJournal = results[2].entries || []; });
   }
   if (addresses.length) begin();
   else api('/api/v1/me/mail/addresses').then(function (b) { addresses = b.addresses || []; begin(); }).catch(function () { begin(); });

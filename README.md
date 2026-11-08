@@ -2,9 +2,9 @@
 
 `openvibe.email` — masks that protect you, burners that self-destruct, and an inbox for every agent.
 
-M1 is **receive only**: Stalwart Community listens on port 25, the service hands out addresses that resolve into
-OpenVibe mailboxes, and nothing here sends or relays mail. Sending, inbox AI and paid custom domains are M2–M4 in
-the OpenVibe Seven Domains plan (2026-11-07) §8.
+Mail receives mail for OpenVibe mailboxes and includes opt-in Inbox AI. Replies stay drafts until the person edits and
+clicks Send; external delivery remains closed unless the configured outbound relay is enabled. See
+[Inbox AI](docs/INBOX-AI.md) for the consent, rules, journal, undo and receipts APIs.
 
 ## M1.5: read your mail (2026-11-07)
 
@@ -38,8 +38,9 @@ page (`public/js/inbox.js`) then shows the result in an iframe with no `allow-sc
 | **Directory** | Stalwart's SQL directory reads `mail_directory_accounts`: every unexpired burner is its **own** account (the burner address is the primary address), so one burner's mail can never be read in another's. Masks and agent inboxes are aliases of the owner's mailbox. A disabled mask or an expired burner resolves to no row and the mail bounces. |
 | **Blobs** | Message blobs live on the mail server's local disk by default (`/var/lib/openvibe-stalwart/blobs`, `STALWART_BLOB_STORE=fs`). S3-compatible storage (B2 in production, MinIO in CI) stays available with `STALWART_BLOB_STORE=s3`. |
 
-The service stores only the addresses and metadata: message bodies are read from Stalwart over loopback JMAP when a
-code is asked for, and are never written to a log, an event or the database. A burner's account is read with no
+Raw message bodies are read from Stalwart over loopback JMAP and are never written to logs or events. With Inbox AI
+enabled, summaries and editable reply drafts are stored per thread in Mail; the draft is the only generated body
+persisted. A burner's account is read with no
 recipient filtering at all; a mask/agent inbox in the shared person mailbox is matched only against the first
 `Delivered-To` header, the one Stalwart stamps — never a sender-written To, Cc or Delivered-To.
 
