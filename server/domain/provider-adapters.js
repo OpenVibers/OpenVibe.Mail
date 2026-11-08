@@ -167,14 +167,14 @@ async function getJson(fetchImpl, url, headers) {
 function normalizeWebhook(adapter, payload) {
     const root = payload || {};
     const nested = root.data || root.event_data || root.message || root;
-    const event = String(root.event || root.RecordType || root.Type || root.type || root.EventType || root.event_type || root.eventType || root.notificationType || root.notification_type || root.Event || nested.event || nested.type || nested.RecordType || nested.event_type || '').toLowerCase();
+    const event = [root.event, root.RecordType, root.Type, root.type, root.EventType, root.event_type, root.eventType, root.notificationType, root.notification_type, root.Event, root.Bounce?.BounceType, nested.event, nested.type, nested.RecordType, nested.event_type].filter(Boolean).join(' ').toLowerCase();
     const recipients = Array.isArray(nested.recipients) ? nested.recipients : Array.isArray(nested.To) ? nested.To : [];
     const firstRecipient = recipients[0];
     const sesRecipient = adapter === 'ses' ? (root.Bounce?.bouncedRecipients?.[0]?.emailAddress || root.Complaint?.complainedRecipients?.[0]?.emailAddress || root.Delivery?.recipients?.[0]) : '';
     const recipient = String(sesRecipient || root.email || root.Email || root.recipient || root.recipient_email || root.Recipient || root.To || root.to || nested.email || nested.Email || nested.recipient || nested.recipient_email || nested.Recipient || nested.To || nested.to || nested.address || firstRecipient?.email || firstRecipient?.Email || firstRecipient || '').trim().toLowerCase();
-    const hard = /hard.?bounc(?:e|ed)|permanent.?bounc(?:e|ed)|bounc(?:e|ed)|undeliverable|spam.?complaint|complaint|blocked/.test(event);
-    const soft = /soft.?bounce|deferred|temporary/.test(event);
-    return { adapter, event, recipient, kind: hard ? (/(complaint|spam)/.test(event) ? 'complaint' : 'hard_bounce') : soft ? 'soft_bounce' : /delivered|delivery/.test(event) ? 'delivered' : 'unknown' };
+    const soft = /soft.?bounc|deferred|temporary|transient/.test(event);
+    const hard = /hard.?bounc|permanent.?bounc|undeliverable|spam.?complaint|complaint|blocked/.test(event) || (!soft && /bounc(?:e|ed)/.test(event));
+    return { adapter, event, recipient, kind: /(complaint|spam)/.test(event) ? 'complaint' : soft ? 'soft_bounce' : hard ? 'hard_bounce' : /delivered|delivery/.test(event) ? 'delivered' : 'unknown' };
 }
 
 function adapterFor(name) {

@@ -80,4 +80,5 @@ test('domain status is normalized and SES signatures cover SigV4 canonical data'
     assert.deepEqual(normalizeWebhook('mailersend', { type: 'activity.spam_complaint', data: { recipient: 'bad@example.net' } }), {
         adapter: 'mailersend', event: 'activity.spam_complaint', recipient: 'bad@example.net', kind: 'complaint',
     });
+    assert.equal(normalizeWebhook('brevo', { event: 'softBounce', email: 'slow@example.net' }).kind, 'soft_bounce');
 });
