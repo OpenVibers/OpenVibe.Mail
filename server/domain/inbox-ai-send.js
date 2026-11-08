@@ -4,6 +4,7 @@ const { sql } = require('openvibe-sdk/db');
 const sending = require('./sending');
 const reply = require('./agent-reply');
 const providers = require('./outbound-providers');
+const providerAdapters = require('./provider-adapters');
 
 function senderAddress(from) {
     const value = Array.isArray(from) ? String(from[0] || '') : String(from || '');
@@ -45,7 +46,9 @@ async function sendInboxDraft({ db, config, stalwart, smtp, owner, threadId, bod
             messageId, inReplyTo: headers.messageId || null,
             references: [...(headers.references || []), headers.messageId].filter(Boolean), at: now() });
         const mailer = smtp || require('../stalwart/smtp');
-        const result = await mailer.sendMessage(route, { from: mailbox.address, to, message });
+        const result = route.adapter && route.adapter !== 'smtp'
+            ? await providerAdapters.send({ route, from: mailbox.address, to, message })
+            : await mailer.sendMessage(route, { from: mailbox.address, to, message });
         if (!result || !result.ok) {
             // Do not retry automatically; a user may explicitly click send again after seeing the failure.
             await db.exec(sql`UPDATE mail_inbox_ai_threads SET draft_state = 'draft', updated_at = now()

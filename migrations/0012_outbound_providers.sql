@@ -2,6 +2,8 @@
 -- Owner-managed outbound SMTP providers. Credentials are ciphertext produced by the service KEK.
 CREATE TABLE IF NOT EXISTS mail_outbound_providers (
     id text PRIMARY KEY,
+    adapter text NOT NULL DEFAULT 'smtp',
+    settings jsonb NOT NULL DEFAULT '{}'::jsonb,
     name text NOT NULL,
     host text NOT NULL,
     port integer NOT NULL CHECK (port BETWEEN 1 AND 65535),

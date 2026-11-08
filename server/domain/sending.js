@@ -20,6 +20,7 @@
 const { sql } = require('openvibe-sdk/db');
 const reply = require('./agent-reply');
 const providers = require('./outbound-providers');
+const providerAdapters = require('./provider-adapters');
 
 /** The words a person reads when a reply cannot go outside OpenVibe yet. */
 const OUTBOUND_CLOSED = 'OpenVibe Mail cannot send outside OpenVibe yet: the reply waits here.';
@@ -80,7 +81,9 @@ async function sendReply({ db, config, inbox, owner, to, body, subject = null, i
     if (!route) {
         outcome = { ok: false, code: 0, reason: OUTBOUND_CLOSED };
     } else {
-        outcome = await mailer.sendMessage(route, { from, to: recipient, message: built });
+        outcome = route.adapter && route.adapter !== 'smtp'
+            ? await providerAdapters.send({ route, from, to: recipient, message: built })
+            : await mailer.sendMessage(route, { from, to: recipient, message: built });
     }
 
     // Recorded whatever happened, in one transaction: the row and the answer cannot disagree.

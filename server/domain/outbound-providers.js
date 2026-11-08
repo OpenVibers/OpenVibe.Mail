@@ -26,7 +26,7 @@ function open(row, key) {
 
 function publicProvider(row) {
     return {
-        id: row.id, name: row.name, host: row.host, port: row.port, username: row.username || null,
+        id: row.id, adapter: row.adapter || 'smtp', settings: row.settings || {}, name: row.name, host: row.host, port: row.port, username: row.username || null,
         has_credential: Boolean(row.credential_ciphertext), secure: row.secure, starttls: row.starttls,
         enabled: row.enabled, priority: row.priority, free_monthly: row.free_monthly,
         price_per_thousand: Number(row.price_per_thousand), monthly_budget: Number(row.monthly_budget),
@@ -38,6 +38,13 @@ function validate(input) {
     const value = input || {};
     const host = String(value.host || '').trim();
     if (!/^[a-z0-9.-]{1,253}$/i.test(host) || host.startsWith('.') || host.endsWith('.')) throw new Error('Enter a valid SMTP host.');
+    const adapter = String(value.adapter || 'smtp');
+    const allowedAdapters = ['smtp','ses','cloudflare','brevo','mailjet','mailersend','resend','smtp2go','zeptomail','postmark'];
+    if (!allowedAdapters.includes(adapter)) throw new Error('Select a supported mail provider.');
+    const settings = value.settings && typeof value.settings === 'object' && !Array.isArray(value.settings) ? value.settings : {};
+    if (/(?:token|secret|password|credential|api.?key)/i.test(JSON.stringify(Object.keys(settings)))) throw new Error('Keep credentials in the encrypted credential field.');
+    if (adapter === 'cloudflare' && !/^[a-z0-9-]{3,64}$/i.test(String(settings.account_id || ''))) throw new Error('Cloudflare needs its account_id in provider settings.');
+    if (adapter === 'ses' && !/^[a-z]{2}(?:-gov)?-[a-z]+-\d$/i.test(String(settings.region || ''))) throw new Error('Amazon SES needs a valid AWS region in provider settings.');
     const port = Number(value.port || 587);
     const priority = Number(value.priority ?? 100);
     const free = Number(value.free_monthly ?? 0);
@@ -47,6 +54,8 @@ function validate(input) {
         || free < 0 || !Number.isFinite(price) || price < 0 || !Number.isFinite(budget) || budget < 0) throw new Error('Provider limits and prices must be non-negative numbers, and the port must be valid.');
     if ((price > 0 || value.enabled) && budget <= 0) throw new Error('Set a monthly budget cap before enabling paid outbound mail.');
     return {
+        adapter,
+        settings,
         id: String(value.id || `smtp_${crypto.randomUUID()}`).slice(0, 80),
         name: String(value.name || host).trim().slice(0, 100), host, port, priority, free, price, budget,
         username: value.username ? String(value.username).slice(0, 200) : null,
@@ -67,9 +76,9 @@ async function save({ db, config, input }) {
     if (secret !== null && secret && !key) throw new Error('MAIL_PROVIDER_KEK must be configured before adding provider credentials.');
     const encrypted = secret ? seal(secret, key) : null;
     return db.exec(sql`INSERT INTO mail_outbound_providers
-        (id,name,host,port,username,credential_ciphertext,credential_nonce,credential_tag,secure,starttls,enabled,priority,free_monthly,price_per_thousand,monthly_budget)
-        VALUES (${p.id},${p.name},${p.host},${p.port},${p.username},${encrypted && encrypted.ciphertext},${encrypted && encrypted.nonce},${encrypted && encrypted.tag},${p.secure},${p.starttls},${p.enabled},${p.priority},${p.free},${p.price},${p.budget})
-        ON CONFLICT (id) DO UPDATE SET name=excluded.name,host=excluded.host,port=excluded.port,username=excluded.username,
+        (id,adapter,settings,name,host,port,username,credential_ciphertext,credential_nonce,credential_tag,secure,starttls,enabled,priority,free_monthly,price_per_thousand,monthly_budget)
+        VALUES (${p.id},${p.adapter},${JSON.stringify(p.settings)}::jsonb,${p.name},${p.host},${p.port},${p.username},${encrypted && encrypted.ciphertext},${encrypted && encrypted.nonce},${encrypted && encrypted.tag},${p.secure},${p.starttls},${p.enabled},${p.priority},${p.free},${p.price},${p.budget})
+        ON CONFLICT (id) DO UPDATE SET adapter=excluded.adapter,settings=excluded.settings,name=excluded.name,host=excluded.host,port=excluded.port,username=excluded.username,
         credential_ciphertext=COALESCE(excluded.credential_ciphertext,mail_outbound_providers.credential_ciphertext),
         credential_nonce=COALESCE(excluded.credential_nonce,mail_outbound_providers.credential_nonce),
         credential_tag=COALESCE(excluded.credential_tag,mail_outbound_providers.credential_tag), secure=excluded.secure,starttls=excluded.starttls,
@@ -97,8 +106,10 @@ async function choose({ db, config, now = new Date() }) {
     if (!row) return null;
     await db.exec(sql`INSERT INTO mail_outbound_usage (provider_id, month, attempts) VALUES (${row.id}, ${month}, 1)
         ON CONFLICT (provider_id, month) DO UPDATE SET attempts = mail_outbound_usage.attempts + 1`);
-    return { kind: 'relay', host: row.host, port: row.port, secure: row.secure, starttls: row.starttls,
-        user: row.username, password: open(row, keyFrom(config)), timeoutMs: 20000, providerId: row.id };
+    let credential = open(row, keyFrom(config));
+    try { credential = JSON.parse(credential); } catch { /* token and SMTP credentials stay strings */ }
+    return { kind: 'relay', adapter: row.adapter || 'smtp', settings: row.settings || {}, host: row.host, port: row.port, secure: row.secure, starttls: row.starttls,
+        user: row.username, password: credential, timeoutMs: 20000, providerId: row.id };
 }
 
 module.exports = { validate, list, save, remove, choose, publicProvider, keyFrom, seal, open };

@@ -29,7 +29,8 @@
     form.addEventListener('submit', function (event) {
         event.preventDefault(); say('');
         var values = new FormData(form); var id = 'smtp_' + crypto.randomUUID();
-        var body = { name: values.get('name'), host: values.get('host'), port: Number(values.get('port')), username: values.get('username'), password: values.get('password'), free_monthly: Number(values.get('free_monthly')), price_per_thousand: Number(values.get('price_per_thousand')), monthly_budget: Number(values.get('monthly_budget')), priority: Number(values.get('priority')), secure: form.elements.secure.checked, starttls: form.elements.starttls.checked, enabled: form.elements.enabled.checked };
+        var body = { adapter: values.get('adapter'), settings: {}, name: values.get('name'), host: values.get('host'), port: Number(values.get('port')), username: values.get('username'), password: values.get('password'), free_monthly: Number(values.get('free_monthly')), price_per_thousand: Number(values.get('price_per_thousand')), monthly_budget: Number(values.get('monthly_budget')), priority: Number(values.get('priority')), secure: form.elements.secure.checked, starttls: form.elements.starttls.checked, enabled: form.elements.enabled.checked };
+        try { body.settings = JSON.parse(values.get('settings_json') || '{}'); } catch (_) { say('Provider settings must be valid JSON.'); return; }
         request('/api/v1/admin/mail/providers/' + encodeURIComponent(id), { method: 'PUT', body: JSON.stringify(body) }).then(function () { form.reset(); form.elements.port.value = '587'; form.elements.starttls.checked = true; status.textContent = 'Provider saved. Credentials will not be shown again.'; load(); }).catch(function (e) { say(e.message); });
     });
     load();
