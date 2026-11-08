@@ -182,7 +182,7 @@ function mountReading(router, { db, stalwart, config, smtp, principal, wrap, fai
         const cleaned = m.html ? cleanHtml(m.html, { images }) : { html: '', blockedImages: 0 };
         return noStore(res).json({
             message: {
-                id: m.id, from: m.from, to: m.to, cc: m.cc, subject: m.subject, date: m.date, unread: m.unread,
+                id: m.id, thread_id: m.threadId, delivered_to: m.deliveredTo, from: m.from, to: m.to, cc: m.cc, subject: m.subject, date: m.date, unread: m.unread,
                 text: m.text || '', html: cleaned.html || null, blocked_images: cleaned.blockedImages,
                 attachments: m.attachments.map((a) => ({ part: a.part, name: a.name, type: downloadType(a.type), size: a.size })),
             },

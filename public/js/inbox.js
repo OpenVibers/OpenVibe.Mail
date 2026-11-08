@@ -21,6 +21,7 @@
   var readEl = root.querySelector('[data-mail-read]');
   var addresses = Array.isArray(data.addresses) ? data.addresses : [];
   var current = 'all', cursor = null, rows = [], openId = null, loading = false, aiEnabled = false, triageThreads = [], aiRules = [], aiJournal = [], imapMailboxes = [];
+  var settingsPage = root.hasAttribute('data-mail-settings'), folder = 'inbox', search = '', selectedLabel = '', workspace = { addresses:[], labels:[] }, openedMessage = null;
   var KIND = { mailbox: 'Your mailbox', mask: 'Mask', agent: 'Agent inbox', burner: 'Burner' };
 
   function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
@@ -53,7 +54,10 @@
   // ── the addresses ──
   function paintSide() {
     side.textContent = '';
-    side.appendChild(el('h2', 'ib-h', 'Addresses'));
+    if (!settingsPage) { paintFolders(); return; }
+    side.appendChild(el('h1', '', 'Mail settings'));
+    var backLink = el('a', 'ib-btn is-quiet', '← Inbox'); backLink.href = '/inbox'; side.appendChild(backLink);
+    side.appendChild(el('h2', 'ib-h', 'Addresses (' + addresses.length + ')'));
     var ul = el('ul', 'ib-addrs');
     var all = [{ address: 'all', kind: 'all', label: 'All mail' }].concat(addresses);
     all.forEach(function (a) {
@@ -66,14 +70,14 @@
       b.appendChild(el('span', 'ib-addr-name', name));
       if (a.kind === 'mailbox') b.appendChild(el('span', 'ib-addr-sub', a.address));
       else if (a.kind !== 'all') b.appendChild(el('span', 'ib-addr-sub', (KIND[a.kind] || 'Address') + (a.label ? ' · ' + a.address : '') + (a.enabled === false ? ' · off' : '')));
-      b.addEventListener('click', function () { current = a.address; cursor = null; rows = []; paintSide(); loadList(); showRead(false); });
+      b.addEventListener('click', function () { location.href = '/inbox?address=' + encodeURIComponent(a.address); });
       li.appendChild(b);
       ul.appendChild(li);
     });
     side.appendChild(ul);
     var aiBox = el('section', 'ib-ai-settings');
     aiBox.id = 'inbox-ai';   // openvibe.my's Receipts card links here to turn Inbox AI on
-    aiBox.appendChild(el('h2', 'ib-h', 'Inbox AI'));
+    aiBox.appendChild(el('h2', 'ib-h', 'Inbox AI (' + (aiEnabled ? '1 enabled' : '0 enabled') + ')'));
     var aiLabel = el('label', 'ib-ai-label');
     var aiToggle = el('input');
     aiToggle.type = 'checkbox'; aiToggle.checked = aiEnabled; aiToggle.setAttribute('aria-label', 'Turn on Inbox AI for this mailbox');
@@ -92,7 +96,7 @@
     // Connected mailboxes: Inbox AI reading another provider over IMAP. Read only, app password, and Disconnect is
     // the way back out; the summaries it pulled go only when the person asks.
     var imapBox = el('section', 'ib-ai-rules ib-imap');
-    imapBox.appendChild(el('h2', 'ib-h', 'Connected mailboxes'));
+    imapBox.appendChild(el('h2', 'ib-h', 'Connected mailboxes (' + imapMailboxes.length + ')'));
     imapBox.appendChild(el('p', 'ib-quiet', 'Read another mailbox over IMAP. Mail only reads it; nothing there is moved or deleted. Use an app password, not your usual password.'));
     imapMailboxes.forEach(function (connection) {
       var item = el('div', 'ib-imap-item');
@@ -135,7 +139,7 @@
     }
     side.appendChild(imapBox);
     var rulesBox = el('section', 'ib-ai-rules');
-    rulesBox.appendChild(el('h2', 'ib-h', 'Rules'));
+    rulesBox.appendChild(el('h2', 'ib-h', 'Rules (' + aiRules.length + ')'));
     function ruleForm(rule) {
       var form = el('form', 'ib-rule-form');
       var name = el('input', 'ib-input'); name.placeholder = 'Rule name'; name.value = rule.name || ''; name.setAttribute('aria-label', 'Rule name');
@@ -167,7 +171,7 @@
     rulesBox.appendChild(ruleForm({ category: 'other', enabled: true }));
     side.appendChild(rulesBox);
     var journalBox = el('section', 'ib-ai-journal');
-    journalBox.appendChild(el('h2', 'ib-h', 'Rule journal'));
+    journalBox.appendChild(el('h2', 'ib-h', 'Rule journal (' + aiJournal.length + ')'));
     aiJournal.forEach(function (entry) {
       var line = el('div', 'ib-journal-entry');
       line.appendChild(el('span', '', entry.rule_name + ' moved a thread to ' + entry.action_category.replace('_', ' ')));
@@ -205,32 +209,38 @@
         p.appendChild(c);
       }).catch(function (err) { made.hidden = false; made.textContent = err.message; }).then(function () { go.disabled = false; });
     });
+    side.appendChild(el('h2', 'ib-h', 'Masks (' + addresses.filter(function (a) { return a.kind === 'mask'; }).length + ')'));
     side.appendChild(form);
     side.appendChild(made);
+    paintSignatures();
+    side.querySelectorAll('input:not([type=checkbox]),select').forEach(function (input) { if (input.parentElement.tagName === 'LABEL') return; var label = el('label', 'ib-field', input.getAttribute('aria-label') || input.placeholder || 'Value'); input.parentNode.insertBefore(label,input); label.appendChild(input); });
   }
 
   // ── the list ──
   function loadList(more) {
-    if (loading) return;
+    if (settingsPage) return;
+    if (folder === 'scheduled' || folder === 'sent') { loadOutbox(); return; }
+    if (loading) { pendingLoad = true; return; }
     loading = true;
     if (!more) { listEl.textContent = ''; listEl.appendChild(el('p', 'ib-quiet', 'Loading your mail…')); }
-    var q = '?address=' + encodeURIComponent(current) + (more && cursor ? '&cursor=' + encodeURIComponent(cursor) : '');
-    api('/api/v1/me/mail/messages' + q).then(function (b) {
+    var q = '?folder=' + encodeURIComponent(folder) + '&q=' + encodeURIComponent(search) + '&label=' + encodeURIComponent(selectedLabel) + '&address=' + encodeURIComponent(current) + (more && cursor ? '&cursor=' + encodeURIComponent(cursor) : '');
+    api('/api/v1/me/mail/workspace/messages' + q).then(function (b) {
       rows = (more ? rows : []).concat(b.messages || []);
       cursor = b.next_cursor || null;
       api('/api/v1/me/mail/triage').then(function (triage) { triageThreads = triage.threads || []; paintList(); }).catch(function () { triageThreads = []; paintList(); });
     }).catch(function (err) {
       listEl.textContent = '';
       listEl.appendChild(el('p', 'ib-problem', err.status === 401 ? 'Sign in again to see your mail.' : 'Your mail could not be loaded. ' + err.message));
-    }).then(function () { loading = false; });
+    }).then(function () { loading = false; if (pendingLoad) { pendingLoad = false; loadList(); } });
   }
   function paintList() {
     listEl.textContent = '';
     var head = el('div', 'ib-listhead');
     var a = addresses.find(function (x) { return x.address === current; });
-    head.appendChild(el('h2', 'ib-h', current === 'all' ? 'All mail' : (a && a.label) || current));
+    head.appendChild(el('h2', 'ib-h', search ? 'Search results' : folder.charAt(0).toUpperCase() + folder.slice(1)));
     listEl.appendChild(head);
-    if (current === 'all' && triageThreads.length) {
+    var triageHost = el('details', 'ib-triage-fold'); triageHost.appendChild(el('summary', '', 'Inbox AI (' + triageThreads.length + ')'));
+    if (current === 'all' && triageThreads.length && folder === 'inbox' && !search) {
       var groups = [
         ['needs_reply', 'Needs a reply'], ['to_read', 'To read'], ['receipts', 'Receipts'],
         ['newsletters', 'Newsletters'], ['other', 'The rest'],
@@ -266,7 +276,7 @@
           } else if (item.draft_state === 'sent') card.appendChild(el('p', 'ib-quiet', 'Reply sent.'));
           section.appendChild(card);
         });
-        listEl.appendChild(section);
+        triageHost.appendChild(section);
       });
     }
     if (!rows.length) {
@@ -285,7 +295,9 @@
       return;
     }
     var ul = el('ul', 'ib-rows');
+    var seenThreads = new Set();
     rows.forEach(function (m) {
+      if (seenThreads.has(m.thread_id)) return; seenThreads.add(m.thread_id);
       var li = el('li');
       var b = el('button', 'ib-row' + (m.unread ? ' is-unread' : '') + (openId === m.id ? ' is-open' : ''));
       b.type = 'button';
@@ -295,13 +307,21 @@
       b.appendChild(top);
       var sub = el('span', 'ib-row-subject', m.subject || '(no subject)');
       if (m.has_attachments) sub.appendChild(el('span', 'ib-clip', ' · attachment'));
+      var threadCount = rows.filter(function (r) { return r.thread_id === m.thread_id; }).length;
+      if (threadCount > 1) sub.appendChild(el('span', '', ' · ' + threadCount + ' messages'));
+      if (m.starred) sub.appendChild(el('span', '', ' · ★'));
+      if (m.labels && m.labels.length) sub.appendChild(el('span', '', ' · ' + m.labels.join(', ')));
       b.appendChild(sub);
       if (current === 'all' && m.to) b.appendChild(el('span', 'ib-row-to', 'to ' + (Array.isArray(m.to) ? m.to[0] : m.to)));
       b.addEventListener('click', function () { openMessage(m.id, false); });
+      var swipeStart;
+      b.addEventListener('touchstart', function (e) { swipeStart = { x:e.changedTouches[0].clientX,y:e.changedTouches[0].clientY }; }, { passive:true });
+      b.addEventListener('touchend', function (e) { var t = e.changedTouches[0]; if (swipeStart && Math.abs(t.clientX-swipeStart.x)>90 && Math.abs(t.clientY-swipeStart.y)<35) { updateMessage(m.id,{ archived:true }).then(function () { notice('Archived.'); var undo = el('button','ib-btn is-quiet','Undo archive'); undo.onclick = function () { updateMessage(m.id,{ archived:false }).then(function () { notice('Returned to inbox.'); }); }; statusBar.appendChild(undo); }); } }, { passive:true });
       li.appendChild(b);
       ul.appendChild(li);
     });
     listEl.appendChild(ul);
+    if (triageHost.childElementCount > 1) listEl.appendChild(triageHost);
     if (cursor) {
       var more = el('button', 'ib-btn is-quiet ib-more', 'Older mail');
       more.type = 'button';
@@ -313,7 +333,7 @@
   // ── one message ──
   function openMessage(id, images) {
     openId = id;
-    paintList();
+    if (folder !== 'scheduled' && folder !== 'sent') paintList();
     readEl.textContent = '';
     readEl.appendChild(el('p', 'ib-quiet', 'Opening…'));
     showRead(true);
@@ -329,6 +349,7 @@
     });
   }
   function paintMessage(m, images) {
+    openedMessage = m;
     readEl.textContent = '';
     var bar = el('div', 'ib-readbar');
     var back = el('button', 'ib-btn is-quiet ib-back', '← Inbox');
@@ -352,6 +373,7 @@
       }).catch(function () { del.disabled = false; });
     });
     bar.appendChild(unread); bar.appendChild(del);
+    messageActions(m,bar);
     readEl.appendChild(bar);
     var head = el('header', 'ib-msghead');
     head.appendChild(el('h2', 'ib-subject', m.subject || '(no subject)'));
@@ -362,6 +384,8 @@
     if (m.date) meta.appendChild(el('time', 'ib-meta-when', ' · ' + new Date(m.date).toLocaleString()));
     head.appendChild(meta);
     readEl.appendChild(head);
+    var thread = el('details', 'ib-thread'); var summary = el('summary', '', 'Conversation'); thread.appendChild(summary); readEl.appendChild(thread);
+    api('/api/v1/me/mail/workspace/threads/' + encodeURIComponent(m.thread_id || m.id)).then(function (result) { summary.textContent = 'Conversation (' + result.ids.length + ')'; result.ids.forEach(function (id,i) { var b = el('button','ib-btn is-quiet',id === m.id ? 'Current message' : 'Message ' + (i+1)); b.onclick = function () { openMessage(id,false); }; thread.appendChild(b); }); }).catch(function () { summary.textContent = 'Conversation unavailable'; });
     if (m.blocked_images > 0 && !images) {
       var note = el('p', 'ib-images');
       note.appendChild(document.createTextNode(m.blocked_images + ' remote image' + (m.blocked_images === 1 ? ' is' : 's are') + ' off, so the sender cannot see that you opened this. '));
@@ -386,6 +410,7 @@
         link.href = '/api/v1/me/mail/messages/' + encodeURIComponent(m.id) + '/attachments/' + encodeURIComponent(a.part);
         link.setAttribute('download', '');
         li.appendChild(link);
+        var preview = el('button','ib-btn is-quiet','Preview'); preview.onclick = async function () { try { var r = await fetch(link.href); if (!r.ok) throw new Error('Could not open attachment.'); window.MailCompose.preview(new File([await r.blob()],a.name,{ type:a.type })); } catch (err) { notice(err.message); } }; li.appendChild(preview);
         if (a.size) li.appendChild(el('span', 'ib-att-size', ' · ' + Math.max(1, Math.round(a.size / 1024)) + ' KB'));
         ul.appendChild(li);
       });
@@ -420,15 +445,97 @@
 
   window.addEventListener('popstate', function () {
     var m = /^\/inbox\/([^/]+)$/.exec(location.pathname);
-    if (m) openMessage(decodeURIComponent(m[1]), false); else { openId = null; showRead(false); paintList(); }
+    if (m && m[1] !== 'settings') openMessage(decodeURIComponent(m[1]), false); else { openId = null; showRead(false); paintList(); }
+  });
+
+  var statusBar, pendingLoad = false;
+  function notice(text) { if (statusBar) statusBar.textContent = text; }
+  function compose(payload,original,mode) { window.MailCompose.open({ api:api,addresses:workspace.addresses, payload:payload,original:original,mode:mode,onQueued:queued }); }
+  function queued(result) {
+    notice('Queued for ' + new Date(result.send_at).toLocaleString() + '.');
+    var undo = el('button','ib-btn','Undo send');
+    undo.onclick = function () { undo.disabled = true; api('/api/v1/me/mail/workspace/outbox/' + result.id + '/cancel',{ method:'POST' }).then(function (b) { notice('Send cancelled.'); compose(b.payload); if (folder === 'scheduled') loadOutbox(); }).catch(function (err) { notice(err.message); }); };
+    statusBar.appendChild(undo);
+    var remaining = Math.max(0,Date.parse(result.undo_until)-Date.now());
+    setTimeout(function () { if (undo.isConnected) { undo.remove(); var link = el('a','','View scheduled sends'); link.href = '/inbox?folder=scheduled'; statusBar.appendChild(link); } },remaining);
+    if (folder === 'scheduled') loadOutbox();
+  }
+  function paintToolbar() {
+    if (settingsPage) return;
+    var toolbar = el('header','ib-toolbar');
+    var title = el('h1','','Mail'); toolbar.appendChild(title);
+    var newMessage = el('button','ib-btn','Compose'); newMessage.onclick = function () { compose(); }; toolbar.appendChild(newMessage);
+    var settings = el('a','ib-btn is-quiet','Settings'); settings.href = '/inbox/settings'; toolbar.appendChild(settings);
+    var form = el('form','ib-search'); var searchInput = el('input','ib-input'); searchInput.type = 'search'; searchInput.placeholder = 'Search mail'; searchInput.setAttribute('aria-label','Search mail');
+    var help = el('p','ib-search-help','from: to: subject: "words" has:attachment after:2026-01-01 before:2026-12-31 · dates use UTC'); help.id = 'search-help'; searchInput.setAttribute('aria-describedby',help.id);
+    var go = el('button','ib-btn is-quiet','Search'); go.type = 'submit'; form.appendChild(searchInput); form.appendChild(go);
+    form.onsubmit = function (e) { e.preventDefault(); search = searchInput.value; folder = search ? 'all' : 'inbox'; cursor = null; paintFolders(); loadList(); };
+    toolbar.appendChild(form); toolbar.appendChild(help);
+    statusBar = el('p','ib-status'); statusBar.setAttribute('role','status'); toolbar.appendChild(statusBar);
+    root.prepend(toolbar);
+    folder = new URLSearchParams(location.search).get('folder') || 'inbox';
+  }
+  function paintFolders() {
+    side.textContent = '';
+    var nav = el('nav','ib-folders'); nav.setAttribute('aria-label','Mail folders');
+    [['inbox','Inbox'],['starred','Starred'],['archive','Archive']].forEach(function (f) { var b = el('button','ib-btn is-quiet' + (folder === f[0] ? ' is-on' : ''),f[1]); b.setAttribute('aria-pressed',String(folder===f[0])); b.onclick = function () { folder = f[0]; selectedLabel = ''; cursor = null; paintFolders(); loadList(); showRead(false); }; nav.appendChild(b); });
+    var more = el('select','ib-input ib-more-folders'); more.setAttribute('aria-label','More folders and labels');
+    [['','More…'],['all','All mail'],['snoozed','Snoozed'],['scheduled','Scheduled'],['sent','Sent']].concat((workspace.labels || []).map(function (l) { return ['label:'+l.name,l.name]; })).forEach(function (f) { var o = el('option','',f[1]); o.value = f[0]; more.appendChild(o); });
+    more.value = selectedLabel ? 'label:'+selectedLabel : ['all','snoozed','scheduled','sent'].includes(folder) ? folder : '';
+    more.onchange = function () { if (!more.value) return; selectedLabel = more.value.startsWith('label:') ? more.value.slice(6) : ''; folder = selectedLabel ? 'all' : more.value; cursor = null; paintFolders(); loadList(); showRead(false); }; nav.appendChild(more); side.appendChild(nav);
+  }
+  function paintSignatures() {
+    var section = el('section','ib-signatures'); section.appendChild(el('h2','ib-h','Signatures (' + workspace.addresses.length + ')'));
+    workspace.addresses.forEach(function (a) { var form = el('form','ib-rule-form'), label = el('label','ib-field',a.address), text = el('textarea','ib-input'); text.value = a.signature || ''; text.maxLength = 4000; label.appendChild(text); form.appendChild(label); var save = el('button','ib-btn is-quiet','Save signature'); save.type = 'submit'; form.appendChild(save); var status = el('p','ib-quiet'); status.setAttribute('role','status'); form.appendChild(status);
+      form.onsubmit = function (e) { e.preventDefault(); save.disabled = true; api('/api/v1/me/mail/workspace/signature',{ method:'PUT',body:{ address:a.address,signature:text.value } }).then(function () { a.signature = text.value; status.textContent = 'Saved.'; }).catch(function (err) { status.textContent = err.message; }).finally(function () { save.disabled = false; }); }; section.appendChild(form); });
+    side.appendChild(section);
+  }
+  function updateMessage(id,body) { return api('/api/v1/me/mail/workspace/messages/' + encodeURIComponent(id),{ method:'PUT',body:body }).then(function () { loadList(); return api('/api/v1/me/mail/workspace/settings'); }).then(function (b) { workspace = b; paintFolders(); }).catch(function (err) { notice(err.message); throw err; }); }
+  function messageActions(m,bar) {
+    ['reply','reply-all','forward'].forEach(function (mode) { var b = el('button','ib-btn is-quiet',mode === 'reply-all' ? 'Reply all' : mode === 'reply' ? 'Reply' : 'Forward'); b.onclick = function () { compose(null,m,mode); }; bar.appendChild(b); });
+    var row = rows.find(function (r) { return r.id === m.id; }) || {};
+    var star = el('button','ib-btn is-quiet',row.starred ? 'Unstar' : 'Star'); star.onclick = function () { updateMessage(m.id,{ starred:!row.starred }).then(function () { row.starred = !row.starred; star.textContent = row.starred ? 'Unstar' : 'Star'; }).catch(function () {}); }; bar.appendChild(star);
+    var archive = el('button','ib-btn is-quiet',row.archived ? 'Move to inbox' : 'Archive'); archive.onclick = function () { updateMessage(m.id,{ archived:!row.archived }).then(function () { showRead(false); notice(row.archived ? 'Moved to inbox.' : 'Archived.'); }).catch(function () {}); }; bar.appendChild(archive);
+    var label = el('button','ib-btn is-quiet','Label'); label.onclick = function () { var name = window.prompt('Label (1–40 characters)'); if (name) updateMessage(m.id,{ label:name }).catch(function () {}); }; bar.appendChild(label);
+    (row.labels || []).forEach(function (name) { var remove = el('button','ib-btn is-quiet','Remove ' + name); remove.onclick = function () { updateMessage(m.id,{ label:name,remove:true }).then(function () { remove.remove(); }).catch(function () {}); }; bar.appendChild(remove); });
+    var snooze = el('input','ib-input ib-snooze'); snooze.type = 'datetime-local'; snooze.setAttribute('aria-label','Snooze until (your local time)'); bar.appendChild(snooze);
+    var go = el('button','ib-btn is-quiet','Snooze'); go.onclick = function () { if (!snooze.value) { snooze.focus(); return; } updateMessage(m.id,{ snooze_until:new Date(snooze.value).toISOString() }).then(function () { showRead(false); notice('Snoozed until ' + new Date(snooze.value).toLocaleString()); }).catch(function () {}); }; bar.appendChild(go);
+    if (folder === 'snoozed') { var wake = el('button','ib-btn is-quiet','Return now'); wake.onclick = function () { updateMessage(m.id,{ snooze_until:null,archived:false }).catch(function () {}); }; bar.appendChild(wake); }
+  }
+  function loadOutbox() {
+    api('/api/v1/me/mail/workspace/outbox').then(function (result) {
+      listEl.textContent = ''; listEl.appendChild(el('h2','ib-h',folder === 'sent' ? 'Sent' : 'Scheduled and pending'));
+      var messages = result.messages.filter(function (m) { return folder === 'sent' ? m.state === 'sent' : ['queued','sending','failed','uncertain'].includes(m.state); });
+      if (!messages.length) listEl.appendChild(el('p','ib-quiet','No messages here.'));
+      messages.forEach(function (m) { var item = el('article','ib-outbox-item'); var open = el('button','ib-row',m.subject || '(no subject)'); item.appendChild(open); item.appendChild(el('p','ib-quiet',m.state + ' · ' + new Date(m.send_at).toLocaleString()));
+        open.onclick = function () { api('/api/v1/me/mail/workspace/outbox/' + m.id).then(function (b) { readEl.textContent = ''; var back = el('button','ib-btn is-quiet','← Mail'); back.onclick = function () { showRead(false); }; readEl.appendChild(back); readEl.appendChild(el('h2','ib-subject',b.payload.subject)); readEl.appendChild(el('p','ib-meta','From ' + b.payload.from + ' · To ' + b.payload.to.join(', '))); readEl.appendChild(el('pre','ib-text',b.payload.text)); (b.payload.attachments || []).forEach(function (a) { var p = el('button','ib-btn is-quiet',a.name); p.onclick = function () { window.MailCompose.preview(window.MailCompose.toFile(a)); }; readEl.appendChild(p); }); (b.outcomes || []).forEach(function (o) { readEl.appendChild(el('p','ib-quiet',o.to + ': ' + o.state)); }); showRead(true); }).catch(function (err) { notice(err.message); }); };
+        if (m.state === 'queued') { var cancel = el('button','ib-btn is-quiet','Cancel and edit'); cancel.onclick = function () { api('/api/v1/me/mail/workspace/outbox/' + m.id + '/cancel',{ method:'POST' }).then(function (b) { compose(b.payload); loadOutbox(); }).catch(function (err) { notice(err.message); }); }; item.appendChild(cancel); }
+        if (m.state === 'uncertain' || m.state === 'failed') item.appendChild(el('p','ib-problem','Open for recipient outcomes. Delivery is not retried automatically.'));
+        listEl.appendChild(item);
+      });
+    }).catch(function (err) { notice(err.message); });
+  }
+  document.addEventListener('keydown',function (e) {
+    if (settingsPage || e.ctrlKey || e.metaKey || e.altKey || e.target.closest('input,textarea,select,[contenteditable],dialog')) return;
+    if (e.key === 'c') { e.preventDefault(); compose(); }
+    if (e.key === '/') { e.preventDefault(); root.querySelector('input[type=search]').focus(); }
+    if (e.key === 'Escape') showRead(false);
+    if (e.key === 'r' && openedMessage) compose(null,openedMessage,'reply');
+    if (e.key === 'e' && openId) updateMessage(openId,{ archived:true }).then(function () { showRead(false); }).catch(function () {});
+    if (e.key === 'j' || e.key === 'k') { var index = rows.findIndex(function (r) { return r.id === openId; }); index = Math.max(0,Math.min(rows.length-1,index+(e.key === 'j' ? 1 : -1))); if (rows[index]) openMessage(rows[index].id,false); }
+    if (e.key === '?') notice('Shortcuts: c compose · / search · r reply · e archive · j/k next/previous · Esc back · Ctrl/⌘ Enter sends a draft. Swipe a message to archive on a phone.');
   });
 
   // The addresses come from the API when the shell does not carry them.
   function begin() {
+    current = new URLSearchParams(location.search).get('address') || 'all';
+    paintToolbar();
     paintSide();
+    api('/api/v1/me/mail/workspace/settings').then(function (b) { workspace = b; if (settingsPage) paintSide(); else paintFolders(); }).catch(function (err) { notice(err.message); });
     loadAiControls().then(function () {
       paintSide();
       // A link from openvibe.my's Receipts card to #inbox-ai lands on the switch, which only exists after this paint.
+      if (location.hash === '#inbox-ai' && !settingsPage) { location.replace('/inbox/settings#inbox-ai'); return; }
       if (location.hash === '#inbox-ai') {
         var ai = document.getElementById('inbox-ai');
         if (ai && ai.scrollIntoView) ai.scrollIntoView({ block: 'center' });
@@ -443,7 +550,7 @@
   if (addresses.length) begin();
   else api('/api/v1/me/mail/addresses').then(function (b) { addresses = b.addresses || []; begin(); }).catch(function () { begin(); });
   var start = /^\/inbox\/([^/]+)$/.exec(location.pathname);
-  if (start) openMessage(decodeURIComponent(start[1]), false);
-  else if (readEl) { readEl.textContent = ''; readEl.appendChild(el('p', 'ib-quiet ib-pick', 'Pick a message to read it here.')); }
+  if (start && start[1] !== 'settings') openMessage(decodeURIComponent(start[1]), false);
+  else if (readEl && !settingsPage) { readEl.textContent = ''; readEl.appendChild(el('p', 'ib-quiet ib-pick', 'Pick a message to read it here.')); }
   narrow.addEventListener && narrow.addEventListener('change', function () { if (!narrow.matches) showRead(!!openId); });
 })();

@@ -333,14 +333,16 @@ function createStalwartClient({ config, fetchImpl = globalThis.fetch, log = cons
      * addresses (a mask or an agent inbox); without it, every message in the mailbox. `position` is where the last page
      * stopped in the mailbox's own order. Answers { messages, next } (next is null at the end).
      */
-    async function readMessages({ mailboxAddress, recipient = null, position = 0, limit = 50 }) {
+    async function readMessages({ mailboxAddress, recipient = null, position = 0, limit = 50, filter = null }) {
         const accountId = await accountIdFor(mailboxAddress);
         if (!accountId) return { messages: [], next: null };
         const wanted = recipient ? String(recipient).trim().toLowerCase() : null;
         const perPage = Math.min(Math.max(Number(limit) || 50, 1), 100);
         const scan = wanted ? 500 : perPage;
         const start = Math.max(0, Math.floor(Number(position) || 0));
-        const queried = await one('Email/query', { accountId, filter: {}, sort: [{ property: 'receivedAt', isAscending: false }], position: start, limit: scan }, 'q');
+        const boxes = filter ? await one('Mailbox/query', { accountId, filter: { role: 'trash' } }, 'trash') : { ids: [] };
+        const queryFilter = filter && boxes.ids?.length ? { operator: 'AND', conditions: [filter, { inMailboxOtherThan: boxes.ids }] } : (filter || {});
+        const queried = await one('Email/query', { accountId, filter: queryFilter, sort: [{ property: 'receivedAt', isAscending: false }], position: start, limit: scan }, 'q');
         const ids = queried.ids || [];
         if (!ids.length) return { messages: [], next: null };
         const got = await one('Email/get', { accountId, ids, properties: READ_LIST_PROPS }, 'e');
@@ -355,6 +357,7 @@ function createStalwartClient({ config, fetchImpl = globalThis.fetch, log = cons
             if (wanted && to !== wanted) continue;
             messages.push({
                 id: m.id,
+                keywords: m.keywords || {},
                 threadId: m.threadId || m.id,
                 from: (m.from || []).map((a) => (a.name ? `${a.name} <${a.email}>` : a.email)).filter(Boolean),
                 to: to ? [to] : (m.to || []).map((a) => a.email).filter(Boolean).slice(0, 1),
@@ -441,6 +444,21 @@ function createStalwartClient({ config, fetchImpl = globalThis.fetch, log = cons
         return Boolean(result.updated && Object.prototype.hasOwnProperty.call(result.updated, id));
     }
 
+    async function setKeywords({ mailboxAddress, id, keywords }) {
+        const accountId = await accountIdFor(mailboxAddress);
+        if (!accountId) return false;
+        const update = Object.fromEntries(Object.entries(keywords).map(([key, value]) => [`keywords/${key}`, value ? true : null]));
+        const result = await one('Email/set', { accountId, update: { [id]: update } }, 's');
+        return Boolean(result.updated && Object.prototype.hasOwnProperty.call(result.updated, id));
+    }
+
+    async function readThread({ mailboxAddress, id }) {
+        const accountId = await accountIdFor(mailboxAddress);
+        if (!accountId) return [];
+        const result = await one('Thread/get', { accountId, ids: [id] }, 't');
+        return result.list?.[0]?.emailIds || [];
+    }
+
     /** Move a message to the mailbox's Trash (Stalwart expunges it after its retention); false when it is not there. */
     async function trashMessage({ mailboxAddress, id }) {
         const accountId = await accountIdFor(mailboxAddress);
@@ -461,6 +479,8 @@ function createStalwartClient({ config, fetchImpl = globalThis.fetch, log = cons
         accountIdFor,
         listMessages,
         readMessages,
+        setKeywords,
+        readThread,
         readMessage,
         readForRecipient,
         readAttachment,

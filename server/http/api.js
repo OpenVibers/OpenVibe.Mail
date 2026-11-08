@@ -327,6 +327,7 @@ function createApi({ db, config, stalwart, events, principal, log = console, smt
     }));
 
     // Reading your own mail (M1.5): server/http/reading-routes.js.
+    require('./workspace-routes').mountWorkspace(router, { db, stalwart, config, smtp, principal, wrap, fail, ownerOf });
     require('./reading-routes').mountReading(router, { db, stalwart, config, smtp, principal, wrap, fail, ownerOf });
 
     // Inbox AI pulling another provider's mailbox over IMAP: server/http/imap-routes.js.
