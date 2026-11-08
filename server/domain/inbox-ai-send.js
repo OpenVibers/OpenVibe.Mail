@@ -4,7 +4,6 @@ const { sql } = require('openvibe-sdk/db');
 const sending = require('./sending');
 const reply = require('./agent-reply');
 const providers = require('./outbound-providers');
-const providerAdapters = require('./provider-adapters');
 
 function senderAddress(from) {
     const value = Array.isArray(from) ? String(from[0] || '') : String(from || '');
@@ -29,11 +28,8 @@ async function sendInboxDraft({ db, config, stalwart, smtp, owner, threadId, bod
         return { status: 422, code: 'mail.ai_draft.invalid' };
     }
     let route = sending.routeFor(to, config);
-    if (route && route.providerManaged) {
-        const configured = await providers.list(db);
-        route = await providers.choose({ db, config, now: new Date(now()) });
-        if (!route && !configured.length && config.relay && config.relay.host) route = sending.routeFor(to, { ...config, outbound: { ...config.outbound, providerRouting: false } });
-    }
+    const managed = !sending.isLocal(to, config) && config.outbound && config.outbound.enabled ? await providers.list(db) : [];
+    if (managed.length) route = { kind: 'relay', providerManaged: true };
     if (!route) return { status: 409, code: 'mail.outbound_closed', detail: sending.OUTBOUND_CLOSED };
     const claimed = await db.maybe(sql`UPDATE mail_inbox_ai_threads SET draft_state = 'sending',
         draft_body = ${String(text)}, draft_subject = ${String(title || '')}, updated_at = now()
@@ -46,8 +42,8 @@ async function sendInboxDraft({ db, config, stalwart, smtp, owner, threadId, bod
             messageId, inReplyTo: headers.messageId || null,
             references: [...(headers.references || []), headers.messageId].filter(Boolean), at: now() });
         const mailer = smtp || require('../stalwart/smtp');
-        const result = route.adapter && route.adapter !== 'smtp'
-            ? await providerAdapters.send({ route, from: mailbox.address, to, message })
+        const result = route.providerManaged
+            ? await providers.sendWithFailover({ db, config, from: mailbox.address, to, message, kind: 'person', smtp: mailer, now: new Date(now()) })
             : await mailer.sendMessage(route, { from: mailbox.address, to, message });
         if (!result || !result.ok) {
             // Do not retry automatically; a user may explicitly click send again after seeing the failure.

@@ -40,6 +40,41 @@ test('router spreads free sends across providers and respects monthly budget', a
     assert.equal(await providers.choose({ db: s.db, config: s.config }), null);
 });
 
+test('router verifies From DKIM, fails over only after transient refusal, and honors shared suppression', async (t) => {
+    const s = await boot({ env: { MAIL_PROVIDER_KEK: 'test-only-key', MAIL_OUTBOUND: 'on' } });
+    t.after(() => s.close());
+    for (const id of ['smtp_a', 'smtp_b']) await providers.save({ db: s.db, config: s.config, input: {
+        id, name: id, host: id.replace('_', '-') + '.example.net', password: 'p', enabled: true,
+        free_monthly: 10, monthly_budget: 1, settings: { dkim_hosts: ['selector._domainkey.{domain}'] }, priority: id === 'smtp_a' ? 1 : 2,
+    } });
+    const attempted = [];
+    const smtp = { async sendMessage(route) { attempted.push(route.providerId); return attempted.length === 1 ? { ok: false, code: 451, transient: true, reason: 'Try again' } : { ok: true, code: 250 }; } };
+    const sent = await providers.sendWithFailover({ db: s.db, config: s.config, from: 'sender@openvibe.email', to: 'person@gmail.com', message: 'From: sender@openvibe.email\r\n\r\nhello', smtp,
+        lookupTxt: async () => [['v=DKIM1; p=example']], lookupMx: async () => [{ exchange: 'mx.example.net' }] });
+    assert.equal(sent.ok, true);
+    assert.deepEqual(attempted, ['smtp_a','smtp_b']);
+    const permanent = await providers.sendWithFailover({ db: s.db, config: s.config, from: 'sender@openvibe.email', to: 'hard-bounce@gmail.com', message: 'hello', smtp: { async sendMessage(route) { attempted.push(route.providerId); return { ok: false, code: 550, reason: 'Mailbox does not exist' }; } },
+        lookupTxt: async () => [['v=DKIM1; p=example']], lookupMx: async () => [{ exchange: 'mx.example.net' }] });
+    assert.equal(permanent.ok, false);
+    assert.equal(attempted.length, 3, 'a permanent recipient failure must not be sent through another provider');
+    await s.db.exec("INSERT INTO mail_outbound_suppressions(address,reason) VALUES ('blocked@gmail.com','hard_bounce')");
+    const blocked = await providers.sendWithFailover({ db: s.db, config: s.config, from: 'sender@openvibe.email', to: 'blocked@gmail.com', message: 'hello', smtp });
+    assert.equal(blocked.suppressed, true);
+    assert.equal(attempted.length, 3);
+});
+
+test('transient failures open the provider circuit and allow one half-open probe after cooldown', async (t) => {
+    const s = await boot({ env: { MAIL_PROVIDER_KEK: 'test-only-key', MAIL_OUTBOUND: 'on' } });
+    t.after(() => s.close());
+    await providers.save({ db: s.db, config: s.config, input: { id: 'smtp_breaker', name: 'Breaker', host: 'smtp.example.net', password: 'p', enabled: true, free_monthly: 10, monthly_budget: 1 } });
+    const start = new Date();
+    for (let index = 0; index < 3; index += 1) await providers.recordOutcome({ db: s.db, providerId: 'smtp_breaker', to: 'person@gmail.com', ok: false, transient: true, now: start });
+    assert.equal(await providers.choose({ db: s.db, config: s.config, now: start }), null);
+    const reopened = new Date(start.getTime() + 5 * 60_000 + 1);
+    assert.ok(await providers.choose({ db: s.db, config: s.config, now: reopened }));
+    assert.equal(await providers.choose({ db: s.db, config: s.config, now: reopened }), null, 'only one half-open probe may run at once');
+});
+
 test('paid provider cannot be enabled without a monthly budget cap', () => {
     assert.throws(() => providers.validate({ host: 'smtp.example.net', enabled: true, price_per_thousand: 1 }), /monthly budget cap/);
     assert.throws(() => providers.validate({ host: 'smtp.example.net', port: 70000 }), /port must be valid/);

@@ -48,18 +48,24 @@ test('provider error mapping separates permanent refusal, throttling and uncerta
 test('domain status is normalized and SES signatures cover SigV4 canonical data', async () => {
     for (const [adapter, route] of cases) {
         let url = '';
-        if (adapter === 'cloudflare' || adapter === 'zeptomail') {
-            assert.equal(await domainStatus({ route, domain: 'openvibe.email', fetchImpl: async () => { throw new Error('must fail closed without a supported verifier'); } }), false, adapter);
+        if (adapter === 'cloudflare') {
+            assert.equal(await domainStatus({ route, domain: 'openvibe.email', fetchImpl: async () => { throw new Error('Cloudflare domain status uses DNS only'); },
+                lookupTxt: async (host) => [[host.includes('_domainkey') ? 'v=DKIM1; p=test' : 'v=spf1 include:_spf.mx.cloudflare.net ~all']],
+                lookupMx: async () => [{ exchange: 'route1.mx.cloudflare.net' }] }), true, adapter);
             continue;
         }
-        const statusReply = adapter === 'ses' ? { VerifiedForSendingStatus: true }
+        if (adapter === 'zeptomail') {
+            assert.equal(await domainStatus({ route, domain: 'openvibe.email', fetchImpl: async () => { throw new Error('send-only key cannot inspect domains'); } }), false, adapter);
+            continue;
+        }
+        const statusReply = adapter === 'ses' ? { VerifiedForSendingStatus: true, DkimAttributes: { Status: 'SUCCESS' } }
             : adapter === 'brevo' ? { senders: [{ domain: 'openvibe.email', active: true }] }
-                : adapter === 'mailjet' ? { Data: [{ Email: 'sender@openvibe.email', Status: 'Active' }] }
+                : adapter === 'mailjet' ? { Data: [{ DKIMStatus: 'verified', SPFStatus: 'verified' }] }
                     : adapter === 'mailersend' ? { data: [{ name: 'openvibe.email', is_verified: true }] }
                             : adapter === 'resend' ? { data: [{ name: 'openvibe.email', status: 'verified' }] }
-                                : adapter === 'smtp2go' ? { data: { domains: [{ domain: 'openvibe.email', verified: true }] } }
+                                : adapter === 'smtp2go' ? { data: { domains: [{ domain: 'openvibe.email', verified: true, dkim_verified: true }] } }
                                     : adapter === 'zeptomail' ? { data: [{ domain: 'openvibe.email', verified: true }] }
-                                        : { SenderSignatures: [{ FromEmail: 'sender@openvibe.email', Confirmed: true }] };
+                                    : { SenderSignatures: [{ FromEmail: 'sender@openvibe.email', Confirmed: true, DKIMVerified: true }] };
         const verified = await domainStatus({ route, domain: 'openvibe.email', fetchImpl: async (target) => { url = target; return response(statusReply); } });
         assert.equal(verified, true, adapter);
         assert.match(url, /^https:\/\//);
@@ -68,4 +74,10 @@ test('domain status is normalized and SES signatures cover SigV4 canonical data'
     assert.equal(signed.host, 'email.us-east-1.amazonaws.com');
     assert.match(signed.authorization, /SignedHeaders=content-type;host;x-amz-date/);
     assert.equal(normalizeWebhook('resend', { type: 'email.bounced', to: 'bad@example.net' }).kind, 'hard_bounce');
+    assert.deepEqual(normalizeWebhook('ses', { notificationType: 'Bounce', Bounce: { bouncedRecipients: [{ emailAddress: 'bad@example.net' }] } }), {
+        adapter: 'ses', event: 'bounce', recipient: 'bad@example.net', kind: 'hard_bounce',
+    });
+    assert.deepEqual(normalizeWebhook('mailersend', { type: 'activity.spam_complaint', data: { recipient: 'bad@example.net' } }), {
+        adapter: 'mailersend', event: 'activity.spam_complaint', recipient: 'bad@example.net', kind: 'complaint',
+    });
 });

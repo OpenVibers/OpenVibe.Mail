@@ -20,7 +20,6 @@
 const { sql } = require('openvibe-sdk/db');
 const reply = require('./agent-reply');
 const providers = require('./outbound-providers');
-const providerAdapters = require('./provider-adapters');
 
 /** The words a person reads when a reply cannot go outside OpenVibe yet. */
 const OUTBOUND_CLOSED = 'OpenVibe Mail cannot send outside OpenVibe yet: the reply waits here.';
@@ -72,18 +71,16 @@ async function sendReply({ db, config, inbox, owner, to, body, subject = null, i
     const built = reply.buildReply({ from, to: recipient, subject, body, messageId: rfcMessageId, inReplyTo, references, at: now(), agentName });
 
     let route = routeFor(recipient, config);
-    if (route && route.providerManaged) {
-        const configured = await providers.list(db);
-        route = await providers.choose({ db, config, now: new Date(now()) });
-        if (!route && !configured.length && config.relay && config.relay.host) route = routeFor(recipient, { ...config, outbound: { ...config.outbound, providerRouting: false } });
-    }
+    const managed = !isLocal(recipient, config) && config.outbound && config.outbound.enabled ? await providers.list(db) : [];
+    if (managed.length) route = { kind: 'relay', providerManaged: true };
     let outcome;
     if (!route) {
         outcome = { ok: false, code: 0, reason: OUTBOUND_CLOSED };
+    } else if (route.providerManaged) {
+        outcome = await providers.sendWithFailover({ db, config, from, to: recipient, message: built, kind: 'person', smtp: mailer, now: new Date(now()) });
+        route = outcome.route || null;
     } else {
-        outcome = route.adapter && route.adapter !== 'smtp'
-            ? await providerAdapters.send({ route, from, to: recipient, message: built })
-            : await mailer.sendMessage(route, { from, to: recipient, message: built });
+        outcome = await mailer.sendMessage(route, { from, to: recipient, message: built });
     }
 
     // Recorded whatever happened, in one transaction: the row and the answer cannot disagree.
