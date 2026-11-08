@@ -425,6 +425,24 @@ test('reading your own mail (M1.5): a mask\'s HTML arrives cleaned, and it is ma
     assert.strictEqual((await call('POST', `/api/v1/me/mail/messages/${m.id}/read`, { as: reader })).status, 200);
     const after = await call('GET', `/api/v1/me/mail/messages?address=${encodeURIComponent(mask.address)}`, { as: reader });
     assert.strictEqual(after.body.messages[0].unread, false, 'seen on the server');
+    const workspace = '/api/v1/me/mail/workspace';
+    const action = await call('PUT', `${workspace}/messages/${m.id}`, { as:reader,json:{ starred:true,archived:true,label:'Delivery' } });
+    assert.strictEqual(action.status,200,JSON.stringify(action.body));
+    const inbox = await call('GET',`${workspace}/messages`,{ as:reader });
+    assert.strictEqual(inbox.body.messages.length,0,'archived mail leaves inbox');
+    // Stalwart's text index is asynchronous; delivery and keyword changes are visible before indexing finishes.
+    // https://www.stalw.art/docs/storage/indexing/
+    let starred;
+    for (let i=0;i<40;i++) {
+        starred = await call('GET',`${workspace}/messages?folder=starred&q=subject:Shipped`,{ as:reader });
+        assert.strictEqual(starred.status,200,JSON.stringify(starred.body));
+        if (starred.body.messages.length) break;
+        await sleep(250);
+    }
+    assert.strictEqual(starred.status,200,JSON.stringify(starred.body));
+    assert.strictEqual(starred.body.messages.length,1,'JMAP filters keywords and searches before paging');
+    const thread = await call('GET',`${workspace}/threads/${starred.body.messages[0].thread_id}`,{ as:reader });
+    assert.ok(thread.body.ids.includes(m.id),'JMAP thread includes the received message');
     assert.strictEqual((await call('DELETE', `/api/v1/me/mail/messages/${m.id}`, { as: reader })).status, 200);
     assert.ok(!logs.some((l) => /On its way|steal\(\)/.test(String(l))), 'no body in the log');
 });

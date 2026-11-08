@@ -83,3 +83,23 @@ test('domain status is normalized and SES signatures cover SigV4 canonical data'
     assert.equal(normalizeWebhook('resend', { type: 'email.bounced', data: { to: 'bad@example.net', email_id: 'provider-message' } }).messageId, 'provider-message');
     assert.equal(normalizeWebhook('brevo', { event: 'softBounce', email: 'slow@example.net' }).kind, 'soft_bounce');
 });
+
+test('every provider preserves composed HTML, attachment bytes and reply threading', async () => {
+    const { mime } = require('../server/domain/compose');
+    const raw = (await mime({ from:'sender@openvibe.email',to:['person@example.net'],cc:[],subject:'Résumé',text:'hello',html:'<p><b>hello</b></p>',inReplyTo:'original@example.net',references:['original@example.net'],attachments:[{ name:'proof.txt',type:'text/plain',content:Buffer.from('exact bytes').toString('base64') }] },'proof-id',Date.now())).toString();
+    for (const [adapter,route,,reply] of cases) {
+        let body;
+        const result = await send({ route,from:'sender@openvibe.email',to:'person@example.net',message:raw,fetchImpl:async (_url,init) => { body = JSON.parse(init.body); return response(reply); } });
+        assert.equal(result.ok,true,adapter);
+        if (adapter==='ses') {
+            const parsed = await require('mailparser').simpleParser(Buffer.from(body.Content.Raw.Data,'base64'));
+            assert.equal(parsed.attachments[0].content.toString(),'exact bytes'); assert.match(parsed.html,/<b>hello/); assert.equal(parsed.inReplyTo,'<original@example.net>');
+        } else {
+            const json = JSON.stringify(body);
+            assert.ok(json.includes(Buffer.from('exact bytes').toString('base64')),adapter+' attachment');
+            assert.ok(json.includes('<b>hello</b>'),adapter+' HTML');
+            assert.ok(json.includes('original@example.net'),adapter+' threading');
+            assert.ok(json.includes('Résumé'),adapter+' decoded subject');
+        }
+    }
+});

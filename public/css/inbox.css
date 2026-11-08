@@ -147,3 +147,67 @@ main[data-mail-inbox] [hidden] { display: none !important; }
   .ib-pick { display: none; }
   .ib-row { min-height: 64px; }
 }
+
+/* Workspace: folders and mail first; configuration has its own page. */
+main[data-mail-inbox] { grid-template-columns: minmax(300px, 380px) minmax(0, 1fr); grid-template-rows: auto auto minmax(0,1fr); }
+.ib-toolbar { grid-column: 1 / -1; display:flex; flex-wrap:wrap; gap:8px; align-items:center; min-width:0; }
+.ib-toolbar h1 { font-size:24px; margin:0 auto 0 0; }
+.ib-search { display:flex; gap:8px; width:100%; }
+.ib-search-help { font-size:12px; color:var(--ib-muted); margin:0; width:100%; overflow-wrap:anywhere; }
+.ib-status { width:100%; margin:0; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.ib-status:empty { display:none; }
+[data-mail-addresses] { grid-column:1 / -1; padding:0; background:transparent; border:0; overflow:visible; }
+.ib-folders { display:flex; gap:8px; min-width:0; }
+.ib-folders .is-on { outline:2px solid var(--ib-accent); outline-offset:-2px; }
+.ib-more-folders { width:auto; min-width:0; max-width:180px; }
+.ib-btn, .ib-input { min-height:44px; }
+.ib-thread, .ib-triage-fold { margin:12px 0; }
+.ib-thread summary, .ib-triage-fold summary { min-height:44px; padding:12px 0; cursor:pointer; }
+.ib-field { display:grid; gap:6px; font-size:14px; overflow-wrap:anywhere; }
+.ib-snooze { max-width:240px; }
+main[data-mail-settings] { display:block; height:auto; max-width:760px; padding:16px; }
+main[data-mail-settings] [data-mail-list], main[data-mail-settings] [data-mail-read] { display:none; }
+main[data-mail-settings] [data-mail-addresses] { padding:0; }
+main[data-mail-settings] .ib-h { display:block; margin-top:24px; }
+main[data-mail-settings] .ib-addrs { display:grid; overflow:visible; padding:0; }
+main[data-mail-settings] .ib-addr { width:100%; max-width:none; text-align:left; border-radius:8px; }
+main[data-mail-settings] .ib-addr-sub { display:block; }
+main[data-mail-settings] .ib-ai-settings, main[data-mail-settings] .ib-newmask, main[data-mail-settings] .ib-made { margin-left:0; margin-right:0; }
+.ib-compose, .ib-preview { box-sizing:border-box; display:block; width:min(720px,calc(100vw - 32px)); max-height:calc(100dvh - 32px); padding:16px; border:1px solid var(--border,#64748b); border-radius:12px; color:var(--text-primary,#e6edf7); background:var(--bg-card,#0f1729); overflow:auto; }
+.ib-compose::backdrop, .ib-preview::backdrop { background:#0009; }
+.ib-compose *, .ib-preview * { box-sizing:border-box; }
+.ib-compose form { display:grid; gap:12px; }
+.ib-compose h2 { margin:0; }
+.ib-compose label { display:grid; gap:6px; font-size:14px; min-width:0; }
+.ib-compose .ib-input { --ib-line:var(--border,#64748b); --ib-input:var(--bg-input,#0d1424); --ib-text:var(--text-primary,#e6edf7); }
+.ib-compose .ib-btn, .ib-preview .ib-btn { --ib-text:var(--text-primary,#e6edf7); --ib-strong:var(--accent-strong,#3472d8); }
+.ib-editor-tools { display:flex; flex-wrap:wrap; gap:4px; }
+.ib-editor { min-height:180px; padding:12px; border:1px solid var(--border,#64748b); border-radius:8px; overflow-wrap:anywhere; }
+.ib-editor blockquote { border-left:3px solid var(--border,#64748b); margin:12px 0; padding-left:12px; white-space:pre-wrap; }
+.ib-signature { white-space:pre-wrap; margin:0; overflow-wrap:anywhere; }
+.ib-compose-files { padding:0; list-style:none; display:grid; gap:8px; }
+.ib-compose-files li { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+.ib-compose-files span { overflow-wrap:anywhere; flex:1; min-width:120px; }
+.ib-compose input[type=file] { max-width:100%; }
+.ib-preview img { display:block; max-width:100%; margin:16px 0; }
+.ib-preview pre { white-space:pre-wrap; overflow-wrap:anywhere; }
+.ib-compose-status { margin:0; overflow-wrap:anywhere; }
+.ib-outbox-item { padding:12px 0; border-bottom:1px solid var(--ib-line); }
+@media (max-width:860px) {
+  main[data-mail-inbox] { padding:16px; gap:12px; }
+  [data-mail-list], [data-mail-read] { padding:0; border:0; background:transparent; }
+  .ib-folders { gap:4px; }
+  .ib-folders .ib-btn { padding:0 10px; font-size:13px; }
+  .ib-more-folders { flex:1; width:70px; padding:0 6px; font-size:13px; }
+  .ib-row { padding:12px 0; touch-action:pan-y; }
+  .ib-row-to { max-width:100%; }
+  .ib-back { display:inline-flex; }
+  main[data-mail-inbox].is-reading .ib-toolbar { display:none; }
+  main[data-mail-settings] .ib-newmask { grid-template-columns:minmax(0,1fr); }
+}
+
+.ib-compose:not([open]), .ib-preview:not([open]) { display:none; }
+
+/* A link drawn as a button (Settings) reads as the button it is: no underline, centred like the others. */
+a.ib-btn { display: inline-flex; align-items: center; justify-content: center; text-decoration: none; }
+.ib-search-help { color: var(--ib-faint, var(--ib-muted)); }

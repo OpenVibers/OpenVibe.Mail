@@ -111,14 +111,14 @@ document.addEventListener('DOMContentLoaded', function () {
  * in one way: a message's frame inherits it, so img-src allows https images, which the frame's own policy keeps off
  * until the person asks to show them (public/js/inbox.js frameFor).
  */
-const INBOX_CSP = CSP.replace("img-src 'self' data: https://openvibe.network https://openvibe.media", "img-src 'self' data: https:");
+const INBOX_CSP = CSP.replace("img-src 'self' data: https://openvibe.network https://openvibe.media", "img-src 'self' data: blob: https:");
 
-function inboxPage(config) {
+function inboxPage(config, settings = false) {
     const base = String(config.baseUrl || 'https://openvibe.email').replace(/\/+$/, '');
     const nav = {
         service: SERVICE,
         apiBase: NETWORK_URL,
-        links: [{ label: 'Home', href: '/' }, { label: 'Inbox', href: '/inbox', active: true }],
+        links: [{ label: 'Home', href: '/' }, { label: 'Inbox', href: '/inbox', active: !settings }, { label: 'Settings', href: '/inbox/settings', active: settings }],
         history: { type: 'page', title: `Inbox · ${SITE_NAME}` },
         silentLogin: `${base}/auth/login?silent=1&next={url}`,
         sessionUrl: '/auth/me',
@@ -128,10 +128,10 @@ function inboxPage(config) {
     return shell.page({
         name: SITE_NAME,
         lang: 'en',
-        title: `Inbox · ${SITE_NAME}`,
+        title: `${settings ? 'Settings' : 'Inbox'} · ${SITE_NAME}`,
         siteName: SITE_NAME,
         description: 'The mail that came to your mailbox, your masks and your agents.',
-        canonical: `${base}/inbox`,
+        canonical: `${base}/inbox${settings ? '/settings' : ''}`,
         robots: 'noindex, nofollow',
         home: '/',
         navLinks: nav.links,
@@ -139,9 +139,10 @@ function inboxPage(config) {
         head: `<meta name="referrer" content="no-referrer">
 <link rel="stylesheet" href="${ovServe.url('kit.css')}">
 <link rel="stylesheet" href="${asset('css/inbox.css')}">
+<script src="${asset('js/compose.js')}" defer></script>
 <script src="${asset('js/inbox.js')}" defer></script>`,
         body: `<div id="navbar-mount"></div>
-<main data-mail-inbox id="main"><section data-mail-addresses aria-label="Your addresses"></section><section data-mail-list aria-label="Messages"></section><section data-mail-read aria-label="The message"></section></main>
+<main data-mail-inbox ${settings ? 'data-mail-settings' : ''} id="main"><section data-mail-addresses aria-label="Your addresses"></section><section data-mail-list aria-label="Messages"></section><section data-mail-read aria-label="The message"></section></main>
 <script type="application/json" id="mail-data">{}</script>
 <script>window.__OV_PAGE = ${JSON.stringify({ navbar: nav }).replace(/</g, '\\u003c')};</script>`,
     });
@@ -170,6 +171,10 @@ function mountPages(app, { config }) {
     app.use('/css', express.static(path.join(PUBLIC_DIR, 'css'), { index: false, redirect: false }));
     app.use('/js', express.static(path.join(PUBLIC_DIR, 'js'), { index: false, redirect: false }));
     app.use(['/css', '/js'], (_req, res) => res.status(404).set('Cache-Control', 'no-store').type('text/plain').send('Not found'));
+    app.get('/inbox/settings', (req, res) => {
+        if (!(req.user && req.user.subject_id)) return res.redirect(302, '/auth/login?next=%2Finbox%2Fsettings');
+        res.set('Content-Security-Policy', INBOX_CSP).set('Cache-Control', 'private, no-store').type('html').send(inboxPage(config, true));
+    });
     let inbox = null;
     app.get(['/inbox', '/inbox/:id'], (req, res) => {
         // A person's own mail: signed in, or sent to sign in and back here. The page is private and never cached.

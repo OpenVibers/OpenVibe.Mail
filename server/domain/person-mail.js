@@ -67,6 +67,7 @@ async function createAddress({ db, config, stalwart, owner, local, domain, kind 
 async function senderAllowed(db, owner, address) {
     const mailbox = await mailboxAddressFor(db, owner);
     if (address === mailbox) return true;
+    if (await db.maybe(sql`SELECT 1 AS ok FROM mail_directory_accounts WHERE owner=${owner} AND address=${address} AND description IN ('mask','agent inbox')`)) return true;
     return Boolean(await db.maybe(sql`SELECT 1 AS ok FROM mail_person_addresses p LEFT JOIN mail_custom_domains d ON d.domain=split_part(p.address,'@',2)
         AND d.owner_subject=p.owner_subject AND d.ownership_verified_at IS NOT NULL
         WHERE p.owner_subject=${owner} AND p.address=${address} AND p.enabled=true AND (p.kind<>'custom' OR d.dkim_verified_at IS NOT NULL)`));
@@ -83,13 +84,7 @@ function buildMessage({ from, to, subject, body, id, reportBase, now }) {
     return `${headers.join('\r\n')}\r\n\r\n${text.replace(/\r\n/g,'\n').replace(/\n/g,'\r\n')}\r\n\r\nReport unwanted mail: ${reportBase}/report/${id}`;
 }
 
-async function send({ db, config, owner, from, recipients, subject, body, policy, smtp, now = new Date(), fetchImpl = globalThis.fetch }) {
-    const sender = cleanAddress(from);
-    const targets = Array.isArray(recipients) ? [...new Set(recipients.map(cleanAddress))] : [];
-    if (!sender || !targets.length || targets.length > 10 || targets.includes(null)) return { status: 422, code: 'mail.send.recipients', detail: 'Use 1–10 valid recipients.' };
-    try { buildMessage({ from: sender, to: targets[0], subject, body, id: crypto.randomUUID(), reportBase: config.baseUrl, now }); }
-    catch (err) { return { status: 422, code: 'mail.send.invalid', detail: err.message }; }
-    if (!await senderAllowed(db, owner, sender)) return { status: 403, code: 'mail.send.sender', detail: 'Choose an address you own with verified sending DNS.' };
+async function checkPolicy({ db, owner, policy }) {
     let signals;
     try { signals = await policy.trust(owner); } catch { return { status: 503, code: 'mail.send.trust_unavailable', detail: 'Network trust checks are unavailable; try again later.' }; }
     const history = await recentHistory(db, owner);
@@ -97,6 +92,19 @@ async function send({ db, config, owner, from, recipients, subject, body, policy
     if (!limit) return { status: 403, code: 'mail.send.trust', detail: 'Verify your account email and wait until your account is one day old before sending.' };
     const pause = paused(history);
     if (pause) return { status: 403, code: 'mail.send.paused', detail: pause };
+    return { limit };
+}
+
+async function send({ db, config, owner, from, recipients, subject, body, policy, smtp, now = new Date(), fetchImpl = globalThis.fetch, makeMessage = null }) {
+    const sender = cleanAddress(from);
+    const targets = Array.isArray(recipients) ? [...new Set(recipients.map(cleanAddress))] : [];
+    if (!sender || !targets.length || targets.length > 10 || targets.includes(null)) return { status: 422, code: 'mail.send.recipients', detail: 'Use 1–10 valid recipients.' };
+    try { if (!makeMessage) buildMessage({ from: sender, to: targets[0], subject, body, id: crypto.randomUUID(), reportBase: config.baseUrl, now }); }
+    catch (err) { return { status: 422, code: 'mail.send.invalid', detail: err.message }; }
+    if (!await senderAllowed(db, owner, sender)) return { status: 403, code: 'mail.send.sender', detail: 'Choose an address you own with verified sending DNS.' };
+    const checked = await checkPolicy({ db,owner,policy });
+    if (checked.code) return checked;
+    const limit = checked.limit;
     const day = now.toISOString().slice(0,10);
     const reserved = await db.tx(async (t) => {
         await t.maybe(sql`SELECT owner_subject FROM mail_mailboxes WHERE owner_subject=${owner} FOR UPDATE`);
@@ -113,7 +121,7 @@ async function send({ db, config, owner, from, recipients, subject, body, policy
         const id = crypto.randomUUID();
         await db.exec(sql`INSERT INTO mail_person_sends(id,owner_subject,sender,recipient,status) VALUES(${id},${owner},${sender},${to},'sending')`);
         let message;
-        try { message = buildMessage({ from: sender, to, subject, body, id, reportBase: config.baseUrl, now }); }
+        try { message = makeMessage ? await makeMessage({ id, to, now }) : buildMessage({ from: sender, to, subject, body, id, reportBase: config.baseUrl, now }); }
         catch (err) { await db.exec(sql`UPDATE mail_person_sends SET status='failed' WHERE id=${id}`); return { status: 422, code: 'mail.send.invalid', detail: err.message }; }
         let result;
         const route = sending.routeFor(to, config);
@@ -130,4 +138,4 @@ async function send({ db, config, owner, from, recipients, subject, body, policy
     return { status: results.every((r) => r.status === 'accepted') ? 200 : 207, results, remaining: Math.max(0,limit-(await db.maybe(sql`SELECT attempts FROM mail_person_daily WHERE owner_subject=${owner} AND day=${day}`)).attempts) };
 }
 
-module.exports = { cleanAddress, validateName, dailyLimit, paused, createAddress, senderAllowed, buildMessage, send };
+module.exports = { checkPolicy, cleanAddress, validateName, dailyLimit, paused, createAddress, senderAllowed, buildMessage, send };
