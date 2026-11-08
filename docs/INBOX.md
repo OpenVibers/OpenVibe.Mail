@@ -14,7 +14,7 @@ Sent message content is available from the owner's outbox and replies appear in 
 
 ## Search and organization
 
-Search uses JMAP filters before pagination: `from:`, `to:`, `subject:`, quoted phrases, bare words, `has:attachment`, `after:YYYY-MM-DD`, and `before:YYYY-MM-DD`. Dates are UTC, after is inclusive and before is exclusive. Inbox excludes archived and snoozed messages. All mail includes them; trash is excluded. Stars, archive and labels are persisted as JMAP keywords; snooze deadlines are durable database rows. Wake-up and snooze extension serialize on the same mailbox lock. A due snooze returns the message to Inbox.
+Search uses JMAP filters before pagination: `from:`, `to:`, `subject:`, quoted phrases, bare words, `has:attachment`, `after:YYYY-MM-DD`, and `before:YYYY-MM-DD`. Dates are UTC, after is inclusive and before is exclusive. Stalwart indexes text in the background, so newly delivered mail may appear in Inbox briefly before text searches find it. Inbox excludes archived and snoozed messages. All mail includes them; trash is excluded. Stars, archive and labels are persisted as JMAP keywords; snooze deadlines are durable database rows. Wake-up and snooze extension serialize on the same mailbox lock. A due snooze returns the message to Inbox.
 
 Conversation membership comes from JMAP Thread/get. List grouping covers the current loaded page; opening Conversation retrieves the full thread's message IDs. HTML messages remain server-cleaned and sandboxed; remote images stay off until requested. Attachment previews render only images or text; other types can be downloaded.
 
