@@ -37,6 +37,8 @@ function mountReading(router, { db, stalwart, config, smtp, principal, wrap, fai
         if (mailbox) list.push({ address: mailbox, kind: 'mailbox', label: null });
         for (const m of maskRows) list.push({ address: m.address, kind: 'mask', label: m.label || null, enabled: m.enabled !== false });
         for (const i of inboxes) list.push({ address: i.address, kind: 'agent', label: i.agent_id || null });
+        const people = await db.many(sql`SELECT address,kind FROM mail_person_addresses WHERE owner_subject=${owner} AND enabled=true ORDER BY created_at`);
+        for (const p of people) list.push({ address: p.address, kind: p.kind, label: null });
         return { mailbox, list };
     }
 

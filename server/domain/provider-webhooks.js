@@ -112,6 +112,10 @@ async function ingest({ db, provider, payload, now = new Date() }) {
         const inserted = await t.maybe(sql`INSERT INTO mail_outbound_webhook_events(provider_id,event_id,recipient,recipient_domain,kind)
             VALUES (${provider.id},${id},${address},${recipientDomain},${normalized.kind}) ON CONFLICT DO NOTHING RETURNING event_id`);
         if (!inserted) return { accepted: true, duplicate: true };
+        if (normalized.messageId && (normalized.kind === 'hard_bounce' || normalized.kind === 'complaint')) {
+            await t.exec(sql`UPDATE mail_person_sends SET status=${normalized.kind === 'complaint' ? 'complaint' : 'bounced'}
+                WHERE provider_id=${provider.id} AND provider_message_id=${normalized.messageId} AND recipient=${address} AND status='accepted'`);
+        }
         if (normalized.kind === 'hard_bounce' || normalized.kind === 'complaint') {
             await t.exec(sql`INSERT INTO mail_outbound_suppressions(address,reason,source_provider) VALUES (${address},${normalized.kind},${provider.id})
                 ON CONFLICT(address) DO UPDATE SET reason=CASE WHEN mail_outbound_suppressions.reason='complaint' THEN 'complaint' ELSE excluded.reason END`);

@@ -16,6 +16,7 @@ const { startPurgeJob } = require('./jobs/purge');
 const { startAgentMailJob } = require('./jobs/agent-mail');
 const { startInboxAiJob } = require('./jobs/inbox-ai');
 const { startImapPullJob } = require('./jobs/imap-pull');
+const { startForwardingJob } = require('./jobs/forwarding');
 
 async function main() {
     const config = configLib.load();
@@ -56,6 +57,7 @@ async function main() {
     // Inbox AI's other inbox: a connected mailbox is read when its own next_sync_at is due. Without MAIL_SECRETS_KEY
     // there is nothing to open, and the job is a no-op.
     const imapPull = startImapPullJob({ db, config, log });
+    const forwarding = startForwardingJob({ db, stalwart, config, log });
 
     const { app } = await createApp({ config, store, stalwart, events, log });
 
@@ -69,6 +71,7 @@ async function main() {
         agentMail.stop();
         inboxAi.stop();
         imapPull.stop();
+        forwarding.stop();
         events.stop();
         server.close(() => {
             store.close().finally(() => process.exit(0));
@@ -78,7 +81,7 @@ async function main() {
     process.on('SIGTERM', () => shutdown('SIGTERM'));
     process.on('SIGINT', () => shutdown('SIGINT'));
 
-    return { server, store, stalwart, events, purge, agentMail, inboxAi, imapPull };
+    return { server, store, stalwart, events, purge, agentMail, inboxAi, imapPull, forwarding };
 }
 
 if (require.main === module) {

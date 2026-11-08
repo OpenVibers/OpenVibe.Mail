@@ -110,7 +110,8 @@ const apiAdapters = {
     // AWS SES v2 SendEmail API and SigV4: https://docs.aws.amazon.com/ses/latest/APIReference-V2/API_SendEmail.html
     ses: {
         async send(ctx) {
-            const c = ctx.credentials, body = { FromEmailAddress: ctx.message.from, Destination: { ToAddresses: [ctx.message.to] }, Content: { Simple: { Subject: { Data: ctx.message.subject, Charset: 'UTF-8' }, Body: { Text: { Data: ctx.message.text, Charset: 'UTF-8' } } } } };
+            const c = ctx.credentials, body = { FromEmailAddress: ctx.message.from, Destination: { ToAddresses: [ctx.message.to] }, Content: { Simple: { Subject: { Data: ctx.message.subject, Charset: 'UTF-8' }, Body: { Text: { Data: ctx.message.text, Charset: 'UTF-8' } },
+                ...(ctx.message.headers['x-openvibe-report-abuse'] ? { Headers: [{ Name: 'X-OpenVibe-Report-Abuse', Value: ctx.message.headers['x-openvibe-report-abuse'] }] } : {}) } } };
             const raw = JSON.stringify(body); const signed = sesAuthorization(c, raw);
             const result = await post(ctx.fetch, `https://${signed.host}/v2/email/outbound-emails`, { host: signed.host, 'x-amz-date': signed.date, authorization: signed.authorization }, body);
             return { messageId: result.MessageId || null };
@@ -124,7 +125,7 @@ const apiAdapters = {
     },
     // Brevo transactional send: https://developers.brevo.com/reference/send-transac-email
     brevo: {
-        async send(ctx) { const data = await post(ctx.fetch, 'https://api.brevo.com/v3/smtp/email', { 'api-key': ctx.credentials }, { sender: { email: ctx.message.from }, to: [{ email: ctx.message.to }], subject: ctx.message.subject, textContent: ctx.message.text }); return { messageId: data.messageId || null }; },
+        async send(ctx) { const data = await post(ctx.fetch, 'https://api.brevo.com/v3/smtp/email', { 'api-key': ctx.credentials }, { sender: { email: ctx.message.from }, to: [{ email: ctx.message.to }], subject: ctx.message.subject, textContent: ctx.message.text, ...(ctx.message.headers['x-openvibe-report-abuse'] ? { headers: { 'X-OpenVibe-Report-Abuse': ctx.message.headers['x-openvibe-report-abuse'] } } : {}) }); return { messageId: data.messageId || null }; },
         async domainStatus(ctx, domain) { const data = await getJson(ctx.fetch, 'https://api.brevo.com/v3/senders?limit=100', { 'api-key': ctx.credentials }); return (data.senders || []).some((s) => s.domain === domain && s.active === true); },
     },
     // Mailjet Send API v3.1: https://dev.mailjet.com/email/guides/send-api-v31/
@@ -139,7 +140,7 @@ const apiAdapters = {
     },
     // Resend send email: https://resend.com/docs/api-reference/emails/send-email
     resend: {
-        async send(ctx) { const data = await post(ctx.fetch, 'https://api.resend.com/emails', { authorization: `Bearer ${ctx.credentials}` }, { from: ctx.message.from, to: [ctx.message.to], subject: ctx.message.subject, text: ctx.message.text }); return { messageId: data.id || null }; },
+        async send(ctx) { const data = await post(ctx.fetch, 'https://api.resend.com/emails', { authorization: `Bearer ${ctx.credentials}` }, { from: ctx.message.from, to: [ctx.message.to], subject: ctx.message.subject, text: ctx.message.text, ...(ctx.message.headers['x-openvibe-report-abuse'] ? { headers: { 'X-OpenVibe-Report-Abuse': ctx.message.headers['x-openvibe-report-abuse'] } } : {}) }); return { messageId: data.id || null }; },
         async domainStatus(ctx, domain) { const data = await getJson(ctx.fetch, 'https://api.resend.com/domains', { authorization: `Bearer ${ctx.credentials}` }); return (data.data || []).some((d) => d.name === domain && d.status === 'verified'); },
     },
     // SMTP2GO Send Email: https://developers.smtp2go.com/docs/send-an-email . Verified sender APIs: https://developers.smtp2go.com/docs/getting-started
@@ -154,7 +155,7 @@ const apiAdapters = {
     },
     // Postmark Email API: https://postmarkapp.com/developer/api/email-api
     postmark: {
-        async send(ctx) { const data = await post(ctx.fetch, 'https://api.postmarkapp.com/email', { 'X-Postmark-Server-Token': ctx.credentials, accept: 'application/json' }, { From: ctx.message.from, To: ctx.message.to, Subject: ctx.message.subject, TextBody: ctx.message.text, MessageStream: ctx.settings.message_stream || 'outbound' }); if (Number(data.ErrorCode || 0) !== 0) throw new ProviderError(String(data.Message || 'Postmark rejected the message.'), { status: 400 }); return { messageId: data.MessageID || null }; },
+        async send(ctx) { const data = await post(ctx.fetch, 'https://api.postmarkapp.com/email', { 'X-Postmark-Server-Token': ctx.credentials, accept: 'application/json' }, { From: ctx.message.from, To: ctx.message.to, Subject: ctx.message.subject, TextBody: ctx.message.text, MessageStream: ctx.settings.message_stream || 'outbound', ...(ctx.message.headers['x-openvibe-report-abuse'] ? { Headers: [{ Name: 'X-OpenVibe-Report-Abuse', Value: ctx.message.headers['x-openvibe-report-abuse'] }] } : {}) }); if (Number(data.ErrorCode || 0) !== 0) throw new ProviderError(String(data.Message || 'Postmark rejected the message.'), { status: 400 }); return { messageId: data.MessageID || null }; },
         async domainStatus(ctx, domain) { const data = await getJson(ctx.fetch, 'https://api.postmarkapp.com/senders', { 'X-Postmark-Server-Token': ctx.credentials, accept: 'application/json' }); return (data.SenderSignatures || []).some((s) => String(s.FromEmail || '').toLowerCase().endsWith(`@${domain}`) && s.Confirmed === true && s.DKIMVerified === true); },
     },
 };
@@ -174,7 +175,8 @@ function normalizeWebhook(adapter, payload) {
     const recipient = String(sesRecipient || root.email || root.Email || root.recipient || root.recipient_email || root.Recipient || root.To || root.to || nested.email || nested.Email || nested.recipient || nested.recipient_email || nested.Recipient || nested.To || nested.to || nested.address || firstRecipient?.email || firstRecipient?.Email || firstRecipient || '').trim().toLowerCase();
     const soft = /soft.?bounc|deferred|temporary|transient/.test(event);
     const hard = /hard.?bounc|permanent.?bounc|undeliverable|spam.?complaint|complaint|blocked/.test(event) || (!soft && /bounc(?:e|ed)/.test(event));
-    return { adapter, event, recipient, kind: /(complaint|spam)/.test(event) ? 'complaint' : soft ? 'soft_bounce' : hard ? 'hard_bounce' : /delivered|delivery/.test(event) ? 'delivered' : 'unknown' };
+    const messageId = String(root.mail?.messageId || root.MessageID || root.MessageId || root.message_id || nested.email_id || nested.message_id || nested.messageId || '').trim() || null;
+    return { adapter, event, recipient, messageId, kind: /(complaint|spam)/.test(event) ? 'complaint' : soft ? 'soft_bounce' : hard ? 'hard_bounce' : /delivered|delivery/.test(event) ? 'delivered' : 'unknown' };
 }
 
 function adapterFor(name) {
