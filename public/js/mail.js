@@ -104,31 +104,40 @@
     if (kept) show(kept);
 
     // A signed-in person's own addresses (GET /api/v1/me/mail): the kind, the address, its state and the count of
-    // messages. A visitor gets 401 and the section stays hidden. Nothing here reads a message.
+    // messages. Nothing here reads a message. It is asked for only when someone is signed in (the navbar says so, or the
+    // page has the session cookie), so a visitor's console shows no 401 on every visit; the section stays hidden.
     var mine = document.querySelector('[data-mail-mine]');
     if (!mine) return;
     var list = mine.querySelector('[data-mail-mine-list]');
     var empty = mine.querySelector('[data-mail-mine-empty]');
     var KIND = { masks: 'Mask', burners: 'Ten-minute address', agent_inboxes: 'Agent inbox' };
     var STATE = { active: 'Active', disabled: 'Off', expired: 'Expired', consumed: 'Used' };
-    fetch('/api/v1/me/mail', { credentials: 'same-origin', headers: { Accept: 'application/json' } })
-        .then(function (r) { return r.ok ? r.json() : null; })
-        .then(function (j) {
-            if (!j) return;
-            mine.hidden = false;
-            var rows = [];
-            ['agent_inboxes', 'burners', 'masks'].forEach(function (k) { (j[k] || []).forEach(function (x) { rows.push({ kind: k, x: x }); }); });
-            empty.hidden = rows.length > 0;
-            rows.forEach(function (r) {
-                var li = document.createElement('li'); li.className = 'ml-row';
-                var a = document.createElement('span'); a.className = 'ml-row-addr'; a.textContent = r.x.address || '';
-                var st = document.createElement('span'); st.className = 'ml-row-state' + (r.x.state === 'active' ? ' is-on' : ''); st.textContent = STATE[r.x.state] || r.x.state || '';
-                var meta = document.createElement('span'); meta.className = 'ml-row-meta';
-                var n = r.x.counts && typeof r.x.counts.messages === 'number' ? r.x.counts.messages : 0;
-                meta.textContent = KIND[r.kind] + (r.x.purpose ? ' · ' + r.x.purpose : '') + ' · ' + n + (n === 1 ? ' message' : ' messages');
-                li.appendChild(a); li.appendChild(st); li.appendChild(meta);
-                list.appendChild(li);
-            });
-        })
-        .catch(function () {});
+    var asked = false;
+    function ask() {
+        if (asked) return;
+        asked = true;
+        fetch('/api/v1/me/mail', { credentials: 'same-origin', headers: { Accept: 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (j) {
+                if (!j) return;
+                mine.hidden = false;
+                var rows = [];
+                ['agent_inboxes', 'burners', 'masks'].forEach(function (k) { (j[k] || []).forEach(function (x) { rows.push({ kind: k, x: x }); }); });
+                empty.hidden = rows.length > 0;
+                rows.forEach(function (r) {
+                    var li = document.createElement('li'); li.className = 'ml-row';
+                    var a = document.createElement('span'); a.className = 'ml-row-addr'; a.textContent = r.x.address || '';
+                    var st = document.createElement('span'); st.className = 'ml-row-state' + (r.x.state === 'active' ? ' is-on' : ''); st.textContent = STATE[r.x.state] || r.x.state || '';
+                    var meta = document.createElement('span'); meta.className = 'ml-row-meta';
+                    var n = r.x.counts && typeof r.x.counts.messages === 'number' ? r.x.counts.messages : 0;
+                    meta.textContent = KIND[r.kind] + (r.x.purpose ? ' · ' + r.x.purpose : '') + ' · ' + n + (n === 1 ? ' message' : ' messages');
+                    li.appendChild(a); li.appendChild(st); li.appendChild(meta);
+                    list.appendChild(li);
+                });
+            })
+            .catch(function () {});
+    }
+    // mail.js runs before navbar.js (both deferred, in that order), so the navbar's answer always arrives after this.
+    document.addEventListener('openvibe-navbar-auth', function (e) { if (e.detail && e.detail.user) ask(); });
+    if (/(?:^|;\s*)ov_token=[^;]/.test(document.cookie || '')) ask();
 })();
