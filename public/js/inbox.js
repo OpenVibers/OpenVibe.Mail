@@ -20,7 +20,7 @@
   var listEl = root.querySelector('[data-mail-list]');
   var readEl = root.querySelector('[data-mail-read]');
   var addresses = Array.isArray(data.addresses) ? data.addresses : [];
-  var current = 'all', cursor = null, rows = [], openId = null, loading = false, aiEnabled = false;
+  var current = 'all', cursor = null, rows = [], openId = null, loading = false, aiEnabled = false, triageThreads = [];
   var KIND = { mailbox: 'Your mailbox', mask: 'Mask', agent: 'Agent inbox', burner: 'Burner' };
 
   function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
@@ -127,7 +127,7 @@
     api('/api/v1/me/mail/messages' + q).then(function (b) {
       rows = (more ? rows : []).concat(b.messages || []);
       cursor = b.next_cursor || null;
-      paintList();
+      api('/api/v1/me/mail/triage').then(function (triage) { triageThreads = triage.threads || []; paintList(); }).catch(function () { triageThreads = []; paintList(); });
     }).catch(function (err) {
       listEl.textContent = '';
       listEl.appendChild(el('p', 'ib-problem', err.status === 401 ? 'Sign in again to see your mail.' : 'Your mail could not be loaded. ' + err.message));
@@ -139,6 +139,45 @@
     var a = addresses.find(function (x) { return x.address === current; });
     head.appendChild(el('h2', 'ib-h', current === 'all' ? 'All mail' : (a && a.label) || current));
     listEl.appendChild(head);
+    if (current === 'all' && triageThreads.length) {
+      var groups = [
+        ['needs_reply', 'Needs a reply'], ['to_read', 'To read'], ['receipts', 'Receipts'],
+        ['newsletters', 'Newsletters'], ['other', 'The rest'],
+      ];
+      groups.forEach(function (group) {
+        var items = triageThreads.filter(function (item) { return item.category === group[0]; });
+        var section = el('section', 'ib-triage-group');
+        section.appendChild(el('h3', 'ib-triage-heading', group[1] + ' · ' + items.length));
+        items.forEach(function (item) {
+          var card = el('article', 'ib-triage-card');
+          card.appendChild(el('p', 'ib-triage-summary', item.summary));
+          if (group[0] === 'needs_reply' && item.draft_state === 'draft') {
+            var subject = el('input', 'ib-input'); subject.value = item.draft_subject || ''; subject.setAttribute('aria-label', 'Draft subject');
+            var editor = el('textarea', 'ib-input ib-draft'); editor.value = item.draft_body || ''; editor.setAttribute('aria-label', 'Edit suggested reply');
+            var save = el('button', 'ib-btn is-quiet', 'Save draft'); save.type = 'button';
+            var send = el('button', 'ib-btn', 'Send'); send.type = 'button';
+            var status = el('p', 'ib-quiet');
+            save.addEventListener('click', function () {
+              save.disabled = true;
+              api('/api/v1/me/mail/triage/' + encodeURIComponent(item.thread_id) + '/draft', { method: 'PUT', body: { subject: subject.value, body: editor.value } })
+                .then(function () { status.textContent = 'Draft saved.'; }).catch(function (err) { status.textContent = 'Could not save: ' + err.message; })
+                .finally(function () { save.disabled = false; });
+            });
+            send.addEventListener('click', function () {
+              if (!window.confirm('Send this reply to ' + item.draft_to + '?')) return;
+              send.disabled = true; status.textContent = 'Sending…';
+              api('/api/v1/me/mail/triage/' + encodeURIComponent(item.thread_id) + '/send', { method: 'POST', body: { subject: subject.value, body: editor.value } })
+                .then(function () { status.textContent = 'Sent.'; return api('/api/v1/me/mail/triage'); })
+                .then(function (triage) { triageThreads = triage.threads || []; paintList(); })
+                .catch(function (err) { status.textContent = err.status === 409 ? 'Sending is unavailable for this recipient yet.' : 'Not sent: ' + err.message; send.disabled = false; });
+            });
+            card.appendChild(subject); card.appendChild(editor); card.appendChild(save); card.appendChild(send); card.appendChild(status);
+          } else if (item.draft_state === 'sent') card.appendChild(el('p', 'ib-quiet', 'Reply sent.'));
+          section.appendChild(card);
+        });
+        listEl.appendChild(section);
+      });
+    }
     if (!rows.length) {
       var e = el('div', 'ib-empty');
       e.appendChild(el('p', null, current === 'all' ? 'Nothing here yet.' : 'Nothing has arrived at this address yet.'));

@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS mail_inbox_ai_threads (
     draft_to      text,
     draft_subject text,
     draft_body    text,
-    draft_state   text NOT NULL DEFAULT 'draft' CHECK (draft_state IN ('draft', 'sent')),
+    draft_state   text NOT NULL DEFAULT 'draft' CHECK (draft_state IN ('draft', 'sending', 'sent')),
     received_at   timestamptz,
     updated_at    timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (owner_subject, thread_id)

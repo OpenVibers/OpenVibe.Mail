@@ -20,7 +20,7 @@ const { sql } = require('openvibe-sdk/db');
 const ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 const PART_RE = /^[A-Za-z0-9._-]{1,64}$/;
 
-function mountReading(router, { db, stalwart, principal, wrap, fail, ownerOf }) {
+function mountReading(router, { db, stalwart, config, smtp, principal, wrap, fail, ownerOf }) {
     const requirePerson = principal.requirePerson;
     const read = requirePerson(principal.CAPABILITIES.read);
     const write = requirePerson(principal.CAPABILITIES.write);
@@ -75,6 +75,30 @@ function mountReading(router, { db, stalwart, principal, wrap, fail, ownerOf }) 
         const counts = Object.fromEntries(['needs_reply', 'to_read', 'receipts', 'newsletters', 'other'].map((category) =>
             [category, items.filter((item) => item.category === category).length]));
         return noStore(res).json({ counts, threads: items });
+    }));
+
+    router.put('/api/v1/me/mail/triage/:threadId/draft', write, wrap(async (req, res) => {
+        const threadId = String(req.params.threadId || '');
+        const body = String(req.body && req.body.body || '');
+        const subject = String(req.body && req.body.subject || '');
+        if (!ID_RE.test(threadId) || !body.trim() || body.length > 10000 || subject.length > 2000 || /[\r\n\u0000]/.test(subject)) {
+            return fail(req, res, 422, 'mail.ai_draft.invalid', 'The draft needs a valid thread, subject and body.');
+        }
+        const row = await db.maybe(sql`UPDATE mail_inbox_ai_threads SET draft_body = ${body}, draft_subject = ${subject}, updated_at = now()
+            WHERE owner_subject = ${ownerOf(req)} AND thread_id = ${threadId} AND category = 'needs_reply' AND draft_state = 'draft'
+            RETURNING thread_id, draft_to, draft_subject, draft_body, draft_state`);
+        if (!row) return fail(req, res, 404, 'mail.ai_draft.not_found', 'That draft is not available.');
+        return noStore(res).json({ draft: row });
+    }));
+
+    router.post('/api/v1/me/mail/triage/:threadId/send', write, wrap(async (req, res) => {
+        const threadId = String(req.params.threadId || '');
+        if (!ID_RE.test(threadId)) return fail(req, res, 404, 'mail.ai_draft.not_found', 'That draft is not available.');
+        const { sendInboxDraft } = require('../domain/inbox-ai-send');
+        const result = await sendInboxDraft({ db, config, stalwart, smtp, owner: ownerOf(req), threadId,
+            body: req.body && req.body.body, subject: req.body && req.body.subject });
+        if (result.status !== 200) return fail(req, res, result.status, result.code, result.detail || 'The draft was not sent.');
+        return noStore(res).json(result);
     }));
 
     router.get('/api/v1/me/mail/messages', read, wrap(async (req, res) => {

@@ -53,6 +53,11 @@ main[data-mail-inbox] [hidden] { display: none !important; }
 .ib-ai-label { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 650; }
 .ib-ai-label input { accent-color: var(--ib-accent, #6657d9); }
 .ib-ai-settings p { margin: 6px 0 0; }
+.ib-triage-group { padding: 10px 0; border-bottom: 1px solid var(--ib-line); }
+.ib-triage-heading { margin: 0 0 8px; font-size: 14px; font-weight: 750; }
+.ib-triage-card { display: grid; gap: 8px; padding: 10px 0; border-top: 1px solid var(--ib-line); }
+.ib-triage-summary { margin: 0; font-size: 14px; }
+.ib-draft { min-height: 110px; resize: vertical; }
 .ib-input { width: 100%; min-width: 0; min-height: 42px; padding: 0 12px; border-radius: 12px; border: 1px solid var(--ib-line); background: var(--ib-input); color: var(--ib-text); font: inherit; }
 .ib-made { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 10px 0 0; }
 .ib-made-addr { font: 600 13px/1.3 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow-wrap: anywhere; user-select: all; }

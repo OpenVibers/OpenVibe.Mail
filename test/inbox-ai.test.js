@@ -34,12 +34,13 @@ test('draft creation stays inert and a needs-reply result requires a draft', () 
 });
 
 test('batch triage is consent gated and stores one validated result per thread', async (t) => {
-    const s = await boot();
+    let sends = 0;
+    const s = await boot({ smtp: { sendMessage: async () => { sends++; return { ok: true }; } } });
     t.after(() => s.close());
     const alice = s.network.addUser('alice');
     const made = await s.post('/api/v1/masks', { as: alice, json: { label: 'shop' } });
     const mailbox = await s.db.value('SELECT address FROM mail_mailboxes WHERE owner_subject = $1', [alice.subject]);
-    const message = s.mail.deliver({ mailboxAddress: mailbox, to: made.body.mask.address, from: 'seller@example.net', subject: 'Order update', text: 'marker private body' });
+    const message = s.mail.deliver({ mailboxAddress: mailbox, to: made.body.mask.address, from: 'seller@openvibe.email', subject: 'Order update', text: 'marker private body' });
     let calls = 0;
     await runInboxAi({ db: s.db, stalwart: s.mail, analyze: async () => { calls++; return { category: 'receipts', summary: 'Order updated' }; } });
     assert.strictEqual(calls, 0, 'the setting starts off');
@@ -57,5 +58,13 @@ test('batch triage is consent gated and stores one validated result per thread',
     assert.strictEqual(page.body.threads[0].message_id, message.id);
     assert.strictEqual(page.body.threads[0].draft_state, 'draft');
     assert.strictEqual(calls, 1);
+    assert.strictEqual(sends, 0, 'triage and draft storage never send mail');
+    const threadId = page.body.threads[0].thread_id;
+    const edited = await s.put(`/api/v1/me/mail/triage/${threadId}/draft`, { as: alice, json: { subject: 'Re: Order update', body: 'Edited reply' } });
+    assert.strictEqual(edited.status, 200);
+    assert.strictEqual(sends, 0, 'editing a draft never sends it');
+    const sent = await s.post(`/api/v1/me/mail/triage/${threadId}/send`, { as: alice, json: { subject: 'Re: Order update', body: 'Edited reply' } });
+    assert.strictEqual(sent.status, 200);
+    assert.strictEqual(sends, 1, 'only the explicit send action calls SMTP');
     assert.ok(!s.logs().some((line) => line.includes('marker private body')));
 });
