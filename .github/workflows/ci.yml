@@ -110,4 +110,4 @@ jobs:
         run: npm run test:stalwart
 
   security:
-    uses: OpenVibers/OpenVibe.Shared/.github/workflows/security.yml@423fe519b5fe9594cc81b670e5ba5cb9f21f6176
+    uses: OpenVibers/OpenVibe.Shared/.github/workflows/security.yml@e80c595ff3d4bc46b7e0f41fdb040b985885cb30
