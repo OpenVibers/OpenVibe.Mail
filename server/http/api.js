@@ -191,7 +191,7 @@ function createApi({ db, config, stalwart, events, principal, log = console, smt
 
     // ---- masks -------------------------------------------------------------------------------
 
-    router.post('/api/v1/masks', requirePerson(principal.CAPABILITIES.write), wrap(async (req, res) => {
+    router.post('/api/v1/masks', requirePerson([principal.CAPABILITIES.write, principal.CAPABILITIES.masks]), wrap(async (req, res) => {
         const owner = ownerOf(req);
         const body = req.body || {};
         try {
@@ -211,24 +211,24 @@ function createApi({ db, config, stalwart, events, principal, log = console, smt
         }
     }));
 
-    router.get('/api/v1/masks', requirePerson(principal.CAPABILITIES.read), wrap(async (req, res) => {
+    router.get('/api/v1/masks', requirePerson([principal.CAPABILITIES.read, principal.CAPABILITIES.masks]), wrap(async (req, res) => {
         const list = await masks.listMasks({ db, owner: ownerOf(req) });
         return res.json({ masks: list });
     }));
 
-    router.get('/api/v1/masks/:id', requirePerson(principal.CAPABILITIES.read), wrap(async (req, res) => {
+    router.get('/api/v1/masks/:id', requirePerson([principal.CAPABILITIES.read, principal.CAPABILITIES.masks]), wrap(async (req, res) => {
         const mask = await masks.findMask({ db, owner: ownerOf(req), id: req.params.id });
         if (!mask) return fail(req, res, 404, 'mail.not_found', 'That mask does not exist.');
         return res.json({ mask });
     }));
 
-    router.post('/api/v1/masks/:id/disable', requirePerson(principal.CAPABILITIES.write), wrap(async (req, res) => {
+    router.post('/api/v1/masks/:id/disable', requirePerson([principal.CAPABILITIES.write, principal.CAPABILITIES.masks]), wrap(async (req, res) => {
         const mask = await masks.disableMask({ db, stalwart, owner: ownerOf(req), id: req.params.id });
         if (!mask) return fail(req, res, 404, 'mail.not_found', 'That mask does not exist.');
         return res.json({ mask });
     }));
 
-    router.delete('/api/v1/masks/:id', requirePerson(principal.CAPABILITIES.write), wrap(async (req, res) => {
+    router.delete('/api/v1/masks/:id', requirePerson([principal.CAPABILITIES.write, principal.CAPABILITIES.masks]), wrap(async (req, res) => {
         const mask = await masks.disableMask({ db, stalwart, owner: ownerOf(req), id: req.params.id });
         if (!mask) return fail(req, res, 404, 'mail.not_found', 'That mask does not exist.');
         return res.json({ mask });

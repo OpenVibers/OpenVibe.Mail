@@ -42,6 +42,16 @@ async function startNetwork() {
         return signJwt(claims, privatePem);
     }
 
+    /** The Companion's own token: the Network's Dock token (issuer <issuer>/dock) for the public client 'companion'. */
+    function dockToken(u, { scope = 'mail.mask.manage', ttl = 3600, clientId = 'companion' } = {}) {
+        const now = Math.floor(Date.now() / 1000);
+        const claims = {
+            iss: `${issuer}/dock`, sub: u.id, subject_id: u.subject, username: u.username,
+            client_id: clientId, scope, aud: ['openvibe.network', 'openvibe.chat'], iat: now, exp: now + ttl,
+        };
+        return signJwt(claims, privatePem);
+    }
+
     const server = http.createServer((req, res) => {
         const chunks = [];
         req.on('data', (c) => chunks.push(c));
@@ -78,6 +88,7 @@ async function startNetwork() {
         state: st,
         addUser,
         userToken,
+        dockToken,
         signJwt: (claims) => signJwt(claims, privatePem),
         setDown(v) { st.down = v; },
         close: () => new Promise((r) => server.close(r)),

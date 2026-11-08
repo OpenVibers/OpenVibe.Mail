@@ -23,6 +23,8 @@
 const { serviceAuth, http, ids } = require('openvibe-contracts');
 
 const PRINCIPAL_SUB = /^(svc|app|mod|agent):/;
+// The scope the browser extension holds, and the only one Mail gives it: its own masks.
+const MAIL_MASK_SCOPE = 'mail.mask.manage';
 const USER_SUB = /^usr_[0-9A-HJKMNP-TV-Z]{26}$/;
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
@@ -30,6 +32,9 @@ const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 const CAPABILITIES = {
     write: 'mail.addresses.write',
     read: 'mail.messages.read',
+    // masks is what the browser extension holds: the Companion's own scoped token may manage the
+    // person's masks and nothing else (it never reads a message, never makes a burner).
+    masks: 'mail.mask.manage',
 };
 
 /** Same-origin for a signed-in write: the browser's fetch metadata, else the Origin header. */
@@ -60,6 +65,11 @@ function requesterOfSub(sub) {
     return String(sub);
 }
 
+/** The issuer the Network's Dock tokens carry: the network issuer with /dock behind it. */
+function dockIssuer(config) {
+    return String(config.network.issuer || '').replace(/\/+$/, '') + '/dock';
+}
+
 function capabilitiesOf(claims) {
     const cap = claims && claims.cap;
     if (Array.isArray(cap)) return cap.filter((c) => typeof c === 'string');
@@ -75,6 +85,31 @@ function createPrincipal({ config, keys }) {
             if (!token) return { error: [401, 'token.invalid', 'the Bearer token is empty'] };
 
             const payload = decodePayload(token);
+
+            // The Companion (the browser extension): the Network's Dock token for the public client
+            // 'companion', scoped to 'mail.mask.manage'. It acts for the person who signed in, so it
+            // gets that person's own masks and nothing else.
+            if (payload && payload.client_id === 'companion') {
+                const v = await keys.verifyDock(token, { issuer: dockIssuer(config), audience: config.network.sessionAudience });
+                if (!v.ok) return { error: [401, v.expired ? 'token.expired' : 'token.invalid', v.reason] };
+                const scope = String(v.claims.scope || '').split(/\s+/).filter(Boolean);
+                if (!scope.includes(MAIL_MASK_SCOPE)) {
+                    return { error: [403, 'mail.capability_missing', 'this token may not manage masks'] };
+                }
+                if (!ids.isSubjectId('user', v.claims.subject_id)) {
+                    return { error: [403, 'identity.no_subject', 'this account has no canonical subject yet; sign in again'] };
+                }
+                return {
+                    principal: {
+                        kind: 'app',
+                        requester: 'app:companion',
+                        subject: v.claims.subject_id,
+                        capabilities: [CAPABILITIES.masks],
+                        claims: v.claims,
+                    },
+                };
+            }
+
             if (payload && typeof payload.sub === 'string' && PRINCIPAL_SUB.test(payload.sub)) {
                 const publicKey = await keys.pemForToken(token);
                 if (!publicKey) return { error: [503, 'identity.unavailable', 'the Network signing key is not loaded yet'] };
@@ -162,8 +197,15 @@ function createPrincipal({ config, keys }) {
         return null;
     }
 
-    /** A route for a person: their token, or an app acting for them with the right capability. */
+    /**
+     * A route for a person: their token, or an app acting for them with the right capability.
+     *
+     * 'capability' is the capability the route needs, or a list of them when more than one opens it
+     * (the mask routes are open to the person's own token, to an app with the address capability, and
+     * to the Companion, which holds the mask capability alone).
+     */
     function requirePerson(capability) {
+        const wanted = capability == null ? [] : (Array.isArray(capability) ? capability : [capability]);
         return function guard(req, res, next) {
             const principal = req.principal || { kind: 'anonymous' };
             if (principal.kind === 'anonymous') {
@@ -180,9 +222,10 @@ function createPrincipal({ config, keys }) {
                         ctx: req.ov,
                     });
                 }
-                if (capability && !(principal.capabilities || []).includes(capability)) {
+                const held = principal.capabilities || [];
+                if (wanted.length && !wanted.some((c) => held.includes(c))) {
                     return http.sendProblem(res, 403, 'mail.capability_missing', {
-                        detail: `The app needs the ${capability} capability for this route.`,
+                        detail: `The app needs the ${wanted.join(' or ')} capability for this route.`,
                         ctx: req.ov,
                     });
                 }
@@ -195,4 +238,4 @@ function createPrincipal({ config, keys }) {
     return { middleware, resolve, requirePerson, subjectOf, CAPABILITIES };
 }
 
-module.exports = { createPrincipal, CAPABILITIES, decodePayload, sameOrigin };
+module.exports = { createPrincipal, CAPABILITIES, decodePayload, sameOrigin, dockIssuer };
