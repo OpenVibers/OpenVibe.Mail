@@ -53,6 +53,7 @@
 
   // ── the addresses ──
   function paintSide() {
+    var settingsOpen = !!(side.querySelector('.ib-settings') && side.querySelector('.ib-settings').open);
     side.textContent = '';
     side.appendChild(el('h2', 'ib-h', 'Addresses'));
     var ul = el('ul', 'ib-addrs');
@@ -72,6 +73,8 @@
       ul.appendChild(li);
     });
     side.appendChild(ul);
+    var settings = el('details', 'ib-settings'); settings.open = settingsOpen;
+    settings.appendChild(el('summary', '', 'Mail settings · ' + customDomains.length + ' domains · ' + forwards.length + ' forwards'));
     var personal = el('section', 'ib-person');
     personal.appendChild(el('h2', 'ib-h', 'Your address'));
     var addressForm = el('form', 'ib-rule-form');
@@ -120,7 +123,7 @@
     forwardForm.appendChild(forwardSource); forwardForm.appendChild(forwardTarget); forwardForm.appendChild(forwardGo); forwardForm.appendChild(forwardNote);
     forwardForm.addEventListener('submit', function (event) { event.preventDefault(); forwardGo.disabled = true; api('/api/v1/me/mail/forwards', { method: 'POST', body: { source: forwardSource.value, target: forwardTarget.value } }).then(loadPersonControls).then(paintSide).catch(function (err) { forwardGo.disabled = false; forwardNote.textContent = err.message; }); });
     personal.appendChild(forwardForm);
-    side.appendChild(personal);
+    settings.appendChild(personal);
     var aiBox = el('section', 'ib-ai-settings');
     aiBox.id = 'inbox-ai';   // openvibe.my's Receipts card links here to turn Inbox AI on
     aiBox.appendChild(el('h2', 'ib-h', 'Inbox AI'));
@@ -138,7 +141,7 @@
     aiBox.appendChild(aiLabel);
     var aiCopy = el('p', 'ib-quiet', aiEnabled ? 'On · uses your OpenVibe.AI allowance. Drafts wait for your click.' : 'Off · your mail is not sent for AI triage.');
     aiBox.appendChild(aiCopy);
-    side.appendChild(aiBox);
+    settings.appendChild(aiBox);
     // Connected mailboxes: Inbox AI reading another provider over IMAP. Read only, app password, and Disconnect is
     // the way back out; the summaries it pulled go only when the person asks.
     var imapBox = el('section', 'ib-ai-rules ib-imap');
@@ -183,7 +186,7 @@
     } else if (!imapMailboxes.length) {
       imapBox.appendChild(el('p', 'ib-quiet', 'Turn on Inbox AI to connect a mailbox.'));
     }
-    side.appendChild(imapBox);
+    settings.appendChild(imapBox);
     var rulesBox = el('section', 'ib-ai-rules');
     rulesBox.appendChild(el('h2', 'ib-h', 'Rules'));
     function ruleForm(rule) {
@@ -215,7 +218,7 @@
     }
     aiRules.forEach(function (rule) { rulesBox.appendChild(ruleForm(rule)); });
     rulesBox.appendChild(ruleForm({ category: 'other', enabled: true }));
-    side.appendChild(rulesBox);
+    settings.appendChild(rulesBox);
     var journalBox = el('section', 'ib-ai-journal');
     journalBox.appendChild(el('h2', 'ib-h', 'Rule journal'));
     aiJournal.forEach(function (entry) {
@@ -228,7 +231,8 @@
       } else line.appendChild(el('span', 'ib-quiet', 'Undone'));
       journalBox.appendChild(line);
     });
-    side.appendChild(journalBox);
+    settings.appendChild(journalBox);
+    side.appendChild(settings);
     // New mask: one line, for one site.
     var form = el('form', 'ib-newmask');
     var input = el('input', 'ib-input');
@@ -283,7 +287,9 @@
     var compose = el('form', 'ib-compose');
     compose.appendChild(el('h3', 'ib-h', 'Write a message'));
     var from = el('select', 'ib-input'); from.setAttribute('aria-label', 'Send from');
-    addresses.filter(function (a) { return ['mailbox','name','alias','custom'].indexOf(a.kind) >= 0; }).forEach(function (a) { var option = el('option', '', a.address); option.value = a.address; from.appendChild(option); });
+    addresses.filter(function (a) { return ['mailbox','name','alias','custom'].indexOf(a.kind) >= 0; })
+      .sort(function (a, b) { return ['name','alias','custom','mailbox'].indexOf(a.kind) - ['name','alias','custom','mailbox'].indexOf(b.kind); })
+      .forEach(function (a) { var option = el('option', '', a.address); option.value = a.address; from.appendChild(option); });
     from.value = composeDraft.from || (from.options[0] && from.options[0].value) || '';
     var to = el('input', 'ib-input'); to.type = 'text'; to.placeholder = 'Recipient email, or up to 10 separated by commas'; to.required = true; to.value = composeDraft.to; to.setAttribute('aria-label', 'Recipients');
     var subject = el('input', 'ib-input'); subject.placeholder = 'Subject'; subject.required = true; subject.value = composeDraft.subject; subject.setAttribute('aria-label', 'Subject');
