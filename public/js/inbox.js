@@ -77,8 +77,22 @@
     side.appendChild(ul);
     var personal = el('section', 'ib-person');
     personal.appendChild(el('h2', 'ib-h', 'Your address'));
+    // The mailbox is named after the account id (private, and nobody is stuck with their name), which reads as noise
+    // to whoever gets mail from it: say so, and suggest a name, until the person has one (11-09).
+    var named = addresses.find(function (a) { return a.kind === 'name'; });
+    personal.appendChild(el('p', 'ib-quiet', named
+      ? 'You are ' + named.address + '. Another name here becomes an alias of it.'
+      : 'Your mailbox\'s own address is a random one, so it says nothing about you. Pick a name people can write to; mail to it lands in this inbox.'));
     var addressForm = el('form', 'ib-rule-form');
     var addressName = el('input', 'ib-input'); addressName.placeholder = 'name'; addressName.required = true; addressName.setAttribute('aria-label', 'New address name');
+    if (!named) {
+      // A suggestion only (the person presses Create): their OpenVibe username, in the characters an address allows.
+      fetch('/auth/me', { credentials: 'same-origin', headers: { Accept: 'application/json' } }).then(function (r) { return r.ok ? r.json() : null; }).then(function (me) {
+        // Names are 3-32 letters, numbers or single hyphens (server/domain/person-mail.js validateName).
+        var u = me && me.user && String(me.user.username || '').toLowerCase().replace(/[._\s]+/g, '-').replace(/[^a-z0-9-]+/g, '').replace(/-+/g, '-').slice(0, 32).replace(/^-+|-+$/g, '');
+        if (u && u.length >= 3 && !addressName.value) addressName.value = u;
+      }).catch(function () { /* the field stays empty */ });
+    }
     var addressDomain = el('select', 'ib-input'); addressDomain.setAttribute('aria-label', 'Address domain');
     [{ domain: 'openvibe.email' }].concat(customDomains.filter(function (d) { return d.mx_verified; })).forEach(function (d) { var option = el('option', '', '@' + d.domain); option.value = d.domain; addressDomain.appendChild(option); });
     var addressGo = el('button', 'ib-btn is-quiet', 'Create address'); addressGo.type = 'submit';

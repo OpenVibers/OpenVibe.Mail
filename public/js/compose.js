@@ -26,6 +26,7 @@
     addresses.forEach(function (a) { var o = node('option', a.address + (a.kind === 'mailbox' ? '' : ' · ' + a.kind)); o.value = a.address; from.appendChild(o); });
     if (p.from) from.value = p.from;
     else if (original.delivered_to && addresses.some(function (a) { return a.address === original.delivered_to; })) from.value = original.delivered_to;
+    else { var named = addresses.find(function (a) { return a.kind === 'name'; }); if (named) from.value = named.address; }   // not the random mailbox address
     field('From',from);
     function addr(value) { var match = /<([^<>]+)>/.exec(value || ''); return (match ? match[1] : value || '').trim().toLowerCase(); }
     var owned = addresses.map(function (a) { return a.address; });
