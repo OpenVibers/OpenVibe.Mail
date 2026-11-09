@@ -38,6 +38,7 @@ const answering = require('../domain/agent-answering');
 const outboundProviders = require('../domain/outbound-providers');
 const providerWebhooks = require('../domain/provider-webhooks');
 const providerDomains = require('../domain/provider-domains');
+const addresses = require('../domain/person-mail');
 
 /** Whether this inbox answers mail (track HO6): off unless the person turned it on. */
 const agentInboxesAnswering = (db, owner, inbox) => answering.getAnswering({ db, owner, inbox });
@@ -84,7 +85,12 @@ function createApi({ db, config, stalwart, events, principal, log = console, smt
     }));
     router.get('/api/v1/admin/mail/providers', ownerOnly, wrap(async (_req, res) => {
         const rows = await outboundProviders.list(db);
-        return res.json({ outbound_enabled: Boolean(config.outbound.enabled), providers: rows.map(outboundProviders.publicProvider) });
+        const spam_thresholds = await addresses.spamThresholds(db);
+        return res.json({ outbound_enabled: Boolean(config.outbound.enabled), providers: rows.map(outboundProviders.publicProvider), spam_thresholds });
+    }));
+    router.put('/api/v1/admin/mail/spam-settings', ownerOnly, wrap(async (req, res) => {
+        try { return res.json({ spam_thresholds: await addresses.saveSpamThresholds({ db, input: req.body || {} }) }); }
+        catch (err) { return fail(req, res, 422, 'mail.spam_thresholds.invalid', err.message); }
     }));
     router.put('/api/v1/admin/mail/providers/:id', ownerOnly, wrap(async (req, res) => {
         const input = { ...(req.body || {}), id: req.params.id };

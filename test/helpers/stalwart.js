@@ -9,7 +9,7 @@
  */
 function createFakeStalwart() {
     const mailboxes = new Map(); // account address → messages
-    const calls = { invalidateCaches: 0, listMessages: 0, deleteMessages: 0, destroyAccount: 0, messageBody: 0 };
+    const calls = { invalidateCaches: 0, listMessages: 0, deleteMessages: 0, destroyAccount: 0, messageBody: 0, classifySpam: 0 };
     let counter = 0;
 
     function mailbox(address) {
@@ -21,6 +21,7 @@ function createFakeStalwart() {
     return {
         calls,
         mailboxes,
+        async classifySpam() { calls.classifySpam += 1; return { score: 0, result: 'ham' }; },
 
         /** Put a message in a mailbox, as if it had arrived; the first header is the server's own stamp. */
         deliver({ mailboxAddress, to, from = 'tester@example.net', subject = 'Hello', text = '', html = '', receivedAt = null, headers = [], attachments = [], spam = false }) {

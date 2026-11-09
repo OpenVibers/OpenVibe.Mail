@@ -473,6 +473,19 @@ function createStalwartClient({ config, fetchImpl = globalThis.fetch, log = cons
         return Boolean(result.updated && Object.prototype.hasOwnProperty.call(result.updated, id));
     }
 
+    /** Classify an outbound person message without queueing or delivering it. The raw message is sent only to the
+     * Stalwart management action and is never persisted or logged by this client. */
+    async function classifySpam({ message, from, to }) {
+        const result = await one('x:Action/set', { create: { classify: {
+            '@type': 'ClassifySpam', message, remoteIp: '127.0.0.1',
+            ehloDomain: new URL(base).hostname || 'localhost', mailFrom: from,
+            rcptTo: { [to]: true }, isTls: false,
+        } } }, 'spam');
+        const action = result.created && result.created.classify;
+        if (!action) throw new StalwartError('the mail server did not return a spam classification');
+        return { score: Number(action.score), result: String(action.result || '').toLowerCase() };
+    }
+
     return {
         jmap,
         one,
@@ -486,6 +499,7 @@ function createStalwartClient({ config, fetchImpl = globalThis.fetch, log = cons
         readAttachment,
         setSeen,
         trashMessage,
+        classifySpam,
         deleteMessages,
         destroyAccount,
         messageBody,

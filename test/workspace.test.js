@@ -42,10 +42,10 @@ test('undo cancels persistently, owner isolation and idempotency survive a repea
         assert.equal((await s.post(B+'/send',{ as:alice,json:payload })).body.id,id);
         assert.equal((await s.get(B+'/outbox/'+id,{ as:bob })).status,404);
         assert.equal((await s.post(B+'/outbox/'+id+'/cancel',{ as:bob })).status,409);
-        await compose.runOutbox({ db:s.db,config:s.config,smtp,now:Date.parse(undo_until)-1 });
+        await compose.runOutbox({ db:s.db,config:s.config,smtp,stalwart:s.mail,now:Date.parse(undo_until)-1 });
         assert.equal(sent.length,0);
         assert.equal((await s.post(B+'/outbox/'+id+'/cancel',{ as:alice })).status,200);
-        await compose.runOutbox({ db:s.db,config:s.config,smtp,now:Date.parse(undo_until)+1000 });
+        await compose.runOutbox({ db:s.db,config:s.config,smtp,stalwart:s.mail,now:Date.parse(undo_until)+1000 });
         assert.equal(sent.length,0);
         assert.equal((await s.get(B+'/outbox',{ as:alice })).body.messages[0].state,'cancelled');
     } finally { await s.close(); }
@@ -56,8 +56,8 @@ test('scheduled send waits, delivers rich MIME and claims once across concurrent
         const at = Date.now()+3600000;
         const response = await s.post(B+'/send',{ as:alice,json:{ ...payload,send_at:new Date(at).toISOString(),cc:['cc@openvibe.email'],bcc:['bcc@openvibe.email'],attachments:[{ name:'hello.txt',type:'text/plain',content:Buffer.from('attachment bytes').toString('base64') }] } });
         assert.equal(response.status,202,JSON.stringify(response.body));
-        await compose.runOutbox({ db:s.db,config:s.config,smtp,now:at-1 }); assert.equal(sent.length,0);
-        await Promise.all([compose.runOutbox({ db:s.db,config:s.config,smtp,now:at+1 }),compose.runOutbox({ db:s.db,config:s.config,smtp,now:at+1 })]);
+        await compose.runOutbox({ db:s.db,config:s.config,smtp,stalwart:s.mail,now:at-1 }); assert.equal(sent.length,0);
+        await Promise.all([compose.runOutbox({ db:s.db,config:s.config,smtp,stalwart:s.mail,now:at+1 }),compose.runOutbox({ db:s.db,config:s.config,smtp,stalwart:s.mail,now:at+1 })]);
         assert.equal(sent.length,3);
         const parsed = await simpleParser(sent[0].message);
         assert.equal(parsed.subject,'A subject'); assert.match(parsed.html,/<b>letter<\/b>/);
@@ -79,7 +79,7 @@ test('sender, account trust and outbound controls are checked before queueing an
         assert.equal((await s.post(B+'/send',{ as:young,json:{ ...payload,from:address } })).status,422);
         const r = await s.post(B+'/send',{ as:alice,json:payload }); assert.equal(r.status,202);
         const policy = { trust:async () => { throw new Error('offline'); } };
-        await compose.runOutbox({ db:s.db,config:s.config,smtp,policy,now:Date.parse(r.body.undo_until)+1 });
+        await compose.runOutbox({ db:s.db,config:s.config,smtp,stalwart:s.mail,policy,now:Date.parse(r.body.undo_until)+1 });
         assert.equal(sent.length,0); assert.equal((await s.get(B+'/outbox/'+r.body.id,{ as:alice })).body.state,'failed');
     } finally { await s.close(); }
 });

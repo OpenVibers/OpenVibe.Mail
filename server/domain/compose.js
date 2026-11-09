@@ -93,7 +93,7 @@ async function mime(payload, id, now, reportUrl = null) {
         disableFileAccess: true, disableUrlAccess: true,
         attachments: payload.attachments.map((a) => ({ filename: a.name, content: Buffer.from(a.content,'base64'), contentType: a.type })) }).compile().build();
 }
-async function runOutbox({ db, config, smtp, now = Date.now(), policy = createNetworkPolicy(config) }) {
+async function runOutbox({ db, config, smtp, stalwart, now = Date.now(), policy = createNetworkPolicy(config) }) {
     // A lost acknowledgement cannot safely be retried. Show it for review instead of duplicating mail.
     await db.exec(sql`UPDATE mail_compose_outbox SET state='uncertain',updated_at=now() WHERE state='sending' AND updated_at < now() - interval '15 minutes'`);
     const due = await db.many(sql`SELECT id FROM mail_compose_outbox WHERE state='queued' AND send_at <= ${new Date(now).toISOString()} AND undo_until <= ${new Date(now).toISOString()} ORDER BY send_at LIMIT 20`);
@@ -104,7 +104,7 @@ async function runOutbox({ db, config, smtp, now = Date.now(), policy = createNe
         try {
             const p = row.payload;
             const result = await person.send({ db,config,owner:row.owner_subject,from:p.from,
-                recipients:[...new Set([...p.to,...p.cc,...p.bcc])],subject:p.subject,body:p.text,policy,smtp,now:new Date(now),
+                recipients:[...new Set([...p.to,...p.cc,...p.bcc])],subject:p.subject,body:p.text,policy,smtp,stalwart,now:new Date(now),
                 makeMessage:async ({ id:deliveryId }) => (await mime(p,id,now,`${config.baseUrl}/report/${deliveryId}`)).toString('utf8') });
             outcomes = result.results || [{ state:'failed', reason:result.detail || 'Sending unavailable.' }];
             state = result.status === 200 ? 'sent' : outcomes.some((o) => o.status === 'uncertain') ? 'uncertain' : 'failed';

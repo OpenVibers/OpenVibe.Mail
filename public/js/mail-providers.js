@@ -4,6 +4,7 @@
     if (!root) return;
     var list = root.querySelector('[data-provider-list]');
     var form = root.querySelector('[data-provider-form]');
+    var spamForm = root.querySelector('[data-spam-form]');
     var domainForm = root.querySelector('[data-domain-form]');
     var domainProviders = root.querySelector('[data-domain-providers]');
     var domainStatus = root.querySelector('[data-domain-status]');
@@ -17,6 +18,8 @@
     function load() {
         request('/api/v1/admin/mail/providers').then(function (data) {
             status.textContent = data.outbound_enabled ? 'Outbound delivery is enabled by MAIL_OUTBOUND.' : 'Outbound delivery is closed by MAIL_OUTBOUND.';
+            spamForm.elements.hold_score.value = data.spam_thresholds.hold_score;
+            spamForm.elements.refuse_score.value = data.spam_thresholds.refuse_score;
             list.replaceChildren();
             domainProviders.replaceChildren();
             (data.providers || []).forEach(function (provider) {
@@ -29,8 +32,14 @@
                 card.append(title, detail, remove); list.append(card);
             });
             if (!data.providers || !data.providers.length) list.textContent = 'No outbound providers are configured.';
-        }).catch(function (e) { status.textContent = ''; say(e.message); });
+    }).catch(function (e) { status.textContent = ''; say(e.message); });
     }
+    spamForm.addEventListener('submit', function (event) {
+        event.preventDefault(); say('');
+        var body = { hold_score: Number(spamForm.elements.hold_score.value), refuse_score: Number(spamForm.elements.refuse_score.value) };
+        request('/api/v1/admin/mail/spam-settings', { method: 'PUT', body: JSON.stringify(body) })
+            .then(function () { status.textContent = 'Spam thresholds saved.'; load(); }).catch(function (e) { say(e.message); });
+    });
     form.addEventListener('submit', function (event) {
         event.preventDefault(); say('');
         var values = new FormData(form); var id = 'smtp_' + crypto.randomUUID();
