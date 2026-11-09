@@ -89,6 +89,10 @@ async function createApp(opts = {}) {
     // the shared navbar's release-watch and pick up a new release without a hard refresh, as on every other site.
     require('openvibe-shared/release').createRelease({ service: 'mail', root: ROOT }).mount(app);
 
+    // The machine-readable front door (SEO-2/SEO-3/SEO-33): /.well-known/agent.json, /openapi.json, /llms.txt and
+    // /llms-full.txt. Public data only; no signed-in or admin page is named (server/http/discovery.js).
+    app.use(require('./http/discovery').createDiscoveryRoutes({ config }));
+
     // Sign-in with OpenVibe.Network (openvibe-sdk/sso): /auth/login, /auth/callback, /auth/me, /auth/logout. The
     // session lives in the SDK's host-only ov_token cookie on openvibe.email. A request that already carries a
     // Bearer token is judged by that token alone, so the cookie is not even read for it.
