@@ -6,8 +6,18 @@
  */
 const test = require('node:test');
 const assert = require('node:assert');
+const fs = require('node:fs');
+const path = require('node:path');
 const { boot } = require('./helpers/boot');
 const { asset, siteIdentity } = require('../server/http/pages');
+
+test('provider admin controls save Stalwart spam score cutoffs', () => {
+    const script = fs.readFileSync(path.join(__dirname, '../public/js/mail-providers.js'), 'utf8');
+    assert.match(script, /data-spam-form/);
+    assert.match(script, /\/api\/v1\/admin\/mail\/spam-settings/);
+    assert.match(script, /hold_score/);
+    assert.match(script, /refuse_score/);
+});
 
 test('the navbar takes its service and name from the Contracts site block', () => {
     assert.deepStrictEqual(siteIdentity({ id: 'mail', site: { name: 'Email' } }), { service: 'mail', name: 'OpenVibe.Email' });
@@ -53,7 +63,7 @@ test('the page\'s files are served by content hash, and Shared\'s from /shared',
     assert.match(inboxJs.text, /imap-mailboxes/);
     const providerJs = await s.get(asset('js/mail-providers.js'));
     assert.strictEqual(providerJs.status, 200);
-    for (const marker of ['free_daily', 'price_per_thousand', 'monthly_budget', 'rate_limit_per_minute', 'enabled_kinds', 'lookup_count', 'bounce_rate', 'spend_this_month']) {
+    for (const marker of ['free_daily', 'price_per_thousand', 'monthly_budget', 'rate_limit_per_minute', 'enabled_kinds', 'lookup_count', 'bounce_rate', 'spend_this_month', 'spam-settings', 'hold_score', 'refuse_score']) {
         assert.ok(providerJs.text.includes(marker), marker);
     }
     const navbar = await s.get('/shared/navbar.js');

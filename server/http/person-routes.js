@@ -44,7 +44,7 @@ function mountPersonMail(router, { db, config, stalwart, smtp, principal, wrap, 
 
     router.post('/api/v1/me/mail/send', write, humanOnly, wrap(async (req, res) => {
         const result = await addresses.send({ db, config, owner: ownerOf(req), from: req.body?.from,
-            recipients: req.body?.to, subject: req.body?.subject, body: req.body?.body, policy, smtp, fetchImpl });
+            recipients: req.body?.to, subject: req.body?.subject, body: req.body?.body, policy, smtp, stalwart, fetchImpl });
         if (result.code) return fail(req, res, result.status, result.code, result.detail);
         return noStore(res).status(result.status).json(result);
     }));

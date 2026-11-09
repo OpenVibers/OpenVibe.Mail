@@ -7,6 +7,7 @@ const person = require('../server/domain/person-mail');
 const domains = require('../server/domain/custom-domains');
 const providers = require('../server/domain/outbound-providers');
 const providerDomains = require('../server/domain/provider-domains');
+const { mountPersonMail } = require('../server/http/person-routes');
 const { sql } = require('openvibe-sdk/db');
 
 test('daily allowance grows with trusted history and pauses on bounce or complaint rates', () => {
@@ -39,6 +40,53 @@ test('person send checks trust, recipient cap and concurrent daily allowance', a
     const over = await send(['last@openvibe.email']);
     assert.equal(over.status, 429, over.text);
     assert.match(over.body.detail, /20/);
+});
+
+test('Stalwart score fixtures hold borderline mail, refuse spam, send clean mail, and fail closed', async (t) => {
+    const submitted = [];
+    const smtp = { sendMessage: async (_route, message) => { submitted.push(message); return { ok: true, code: 250 }; } };
+    const s = await boot({ env: { OV_OAUTH_CLIENT_SECRET: 'test-secret' }, smtp });
+    t.after(() => s.close());
+    const alice = s.network.addUser('alice', { ageDays: 3 });
+    const made = await s.post('/api/v1/me/mail/person-addresses', { as: alice, json: { name: 'alice', kind: 'name' } });
+    const fixtures = [
+        { score: 0.2, result: 'ham', status: 'accepted' },
+        { score: 7, result: 'spam', status: 'held' },
+        { score: 12, result: 'spam', status: 'refused' },
+    ];
+    let scoreFixture;
+    s.mail.classifySpam = async ({ message }) => {
+        assert.match(message, /Subject: Hello/);
+        return scoreFixture;
+    };
+    const send = (to) => s.post('/api/v1/me/mail/send', { as: alice, json: { from: made.body.address, to: [to], subject: 'Hello', body: 'Fixture text.' } });
+    for (const fixture of fixtures) {
+        scoreFixture = fixture;
+        const result = await send(`${fixture.status}@openvibe.email`);
+        assert.equal(result.body.results[0].status, fixture.status, result.text);
+    }
+    assert.equal(submitted.length, 1, 'held and refused fixtures never reach the delivery transport');
+    assert.equal(await s.db.value("SELECT count(*) FROM mail_person_sends WHERE spam_score IS NOT NULL"), 3);
+    scoreFixture = null;
+    s.mail.classifySpam = async () => { throw new Error('fixture scoring outage'); };
+    const failed = await send('fail-closed@openvibe.email');
+    assert.equal(failed.body.results[0].status, 'scoring_failed');
+    assert.match(failed.body.results[0].reason, /could not be checked/);
+    assert.equal(submitted.length, 1, 'a scoring failure never reaches the delivery transport');
+    assert.equal(await s.db.value("SELECT count(*) FROM mail_person_sends WHERE spam_result='error' AND spam_outcome='failed'"), 1);
+});
+
+test('owner can tune spam cutoffs and repeated holds pause sending', async (t) => {
+    assert.equal(typeof mountPersonMail, 'function');
+    const s = await boot();
+    t.after(() => s.close());
+    const owner = s.network.addUser('owner', { role: 'owner' });
+    const user = s.network.addUser('regular');
+    assert.equal((await s.put('/api/v1/admin/mail/spam-settings', { as: user, json: { hold_score: 4, refuse_score: 9 } })).status, 404);
+    const saved = await s.put('/api/v1/admin/mail/spam-settings', { as: owner, json: { hold_score: 4, refuse_score: 9 } });
+    assert.deepEqual(saved.body.spam_thresholds, { hold_score: 4, refuse_score: 9 });
+    assert.equal((await s.put('/api/v1/admin/mail/spam-settings', { as: owner, json: { hold_score: 9, refuse_score: 4 } })).status, 422);
+    assert.match(person.paused([...Array(9).fill({ status: 'accepted' }), { status: 'held' }]), /held/);
 });
 
 test('forwarding refuses unverified targets and accepts only Network verified account emails', async (t) => {

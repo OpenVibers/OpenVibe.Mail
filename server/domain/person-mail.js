@@ -27,12 +27,12 @@ function dailyLimit(signals, history) {
     return 20;
 }
 function paused(history) {
-    const accepted = history.filter((row) => ['accepted','bounced','complaint'].includes(row.status));
-    if (accepted.length < 10) return null;
-    const bounced = accepted.filter((row) => row.status === 'bounced').length;
-    const complaints = accepted.filter((row) => row.status === 'complaint').length;
-    if (complaints / accepted.length >= 0.01) return 'Sending is paused after a complaint. Contact Mail support to review it.';
-    if (bounced / accepted.length >= 0.1) return 'Sending is paused after too many bounced messages. Check your recipients and contact Mail support.';
+    const counted = history.filter((row) => ['accepted','bounced','complaint','held','refused'].includes(row.status));
+    if (counted.length < 10) return null;
+    const bouncedOrHeld = counted.filter((row) => ['bounced','held','refused'].includes(row.status)).length;
+    const complaints = counted.filter((row) => row.status === 'complaint').length;
+    if (complaints / counted.length >= 0.01) return 'Sending is paused after a complaint. Contact Mail support to review it.';
+    if (bouncedOrHeld / counted.length >= 0.1) return 'Sending is paused after too many bounced or spam-held messages. Edit held messages and contact Mail support if needed.';
     return null;
 }
 async function recentHistory(db, owner) {
@@ -83,7 +83,27 @@ function buildMessage({ from, to, subject, body, id, reportBase, now }) {
     return `${headers.join('\r\n')}\r\n\r\n${text.replace(/\r\n/g,'\n').replace(/\n/g,'\r\n')}\r\n\r\nReport unwanted mail: ${reportBase}/report/${id}`;
 }
 
-async function send({ db, config, owner, from, recipients, subject, body, policy, smtp, now = new Date(), fetchImpl = globalThis.fetch }) {
+async function spamThresholds(db) {
+    return await db.maybe(sql`SELECT hold_score,refuse_score FROM mail_person_spam_settings WHERE id=true`)
+        || { hold_score: 5, refuse_score: 10 };
+}
+
+function validateSpamThresholds(input) {
+    const hold = Number(input?.hold_score), refuse = Number(input?.refuse_score);
+    if (!Number.isFinite(hold) || !Number.isFinite(refuse) || hold < 0 || hold > 100 || refuse <= hold || refuse > 200) {
+        throw new Error('Use a hold score from 0 to 100 and a higher refuse score up to 200.');
+    }
+    return { hold_score: hold, refuse_score: refuse };
+}
+
+async function saveSpamThresholds({ db, input }) {
+    const value = validateSpamThresholds(input);
+    await db.exec(sql`INSERT INTO mail_person_spam_settings(id,hold_score,refuse_score) VALUES(true,${value.hold_score},${value.refuse_score})
+        ON CONFLICT(id) DO UPDATE SET hold_score=EXCLUDED.hold_score,refuse_score=EXCLUDED.refuse_score,updated_at=now()`);
+    return value;
+}
+
+async function send({ db, config, owner, from, recipients, subject, body, policy, smtp, stalwart, now = new Date(), fetchImpl = globalThis.fetch }) {
     const sender = cleanAddress(from);
     const targets = Array.isArray(recipients) ? [...new Set(recipients.map(cleanAddress))] : [];
     if (!sender || !targets.length || targets.length > 10 || targets.includes(null)) return { status: 422, code: 'mail.send.recipients', detail: 'Use 1–10 valid recipients.' };
@@ -115,6 +135,32 @@ async function send({ db, config, owner, from, recipients, subject, body, policy
         let message;
         try { message = buildMessage({ from: sender, to, subject, body, id, reportBase: config.baseUrl, now }); }
         catch (err) { await db.exec(sql`UPDATE mail_person_sends SET status='failed' WHERE id=${id}`); return { status: 422, code: 'mail.send.invalid', detail: err.message }; }
+        let thresholds;
+        let classification;
+        try {
+            thresholds = await spamThresholds(db);
+            if (typeof stalwart?.classifySpam !== 'function') throw new Error('Spam classification is unavailable.');
+            classification = await stalwart.classifySpam({ message, from: sender, to });
+            if (classification?.score === null || classification?.score === undefined || String(classification.score).trim() === ''
+                || !Number.isFinite(Number(classification.score)) || !['spam','ham','reject','discard'].includes(classification?.result)) {
+                throw new Error('Spam classification returned an invalid result.');
+            }
+        } catch {
+            await db.exec(sql`UPDATE mail_person_sends SET status='scoring_failed',spam_result='error',spam_outcome='failed',spam_scored_at=now() WHERE id=${id}`);
+            results.push({ id, to, status: 'scoring_failed', reason: 'The message could not be checked for spam. Edit it and try again later.' });
+            continue;
+        }
+        const score = Number(classification.score);
+        if (classification.result === 'reject' || classification.result === 'discard' || score >= Number(thresholds.refuse_score)) {
+            await db.exec(sql`UPDATE mail_person_sends SET status='refused',spam_score=${score},spam_result=${classification.result},spam_outcome='refused',spam_scored_at=now() WHERE id=${id}`);
+            results.push({ id, to, status: 'refused', spam_score: score, reason: 'Stalwart refused this message as spam. Edit it before sending again.' });
+            continue;
+        }
+        if (score >= Number(thresholds.hold_score)) {
+            await db.exec(sql`UPDATE mail_person_sends SET status='held',spam_score=${score},spam_result=${classification.result},spam_outcome='held',spam_scored_at=now() WHERE id=${id}`);
+            results.push({ id, to, status: 'held', spam_score: score, reason: 'This message was held for a high spam score. Edit it before sending again.' });
+            continue;
+        }
         let result;
         const route = sending.routeFor(to, config);
         try {
@@ -123,11 +169,11 @@ async function send({ db, config, owner, from, recipients, subject, body, policy
             else result = await providers.sendWithFailover({ db, config, from: sender, to, message, kind: 'person', smtp: mailer, fetchImpl, now });
         } catch { result = { ok: false, uncertain: true, reason: 'The provider response was uncertain.' }; }
         const state = result.ok ? 'accepted' : result.uncertain ? 'uncertain' : 'failed';
-        await db.exec(sql`UPDATE mail_person_sends SET status=${state},provider_id=${result.route?.providerId || null},provider_message_id=${result.messageId || null} WHERE id=${id}`);
+        await db.exec(sql`UPDATE mail_person_sends SET status=${state},spam_score=${score},spam_result=${classification.result},spam_outcome=${state},spam_scored_at=now(),provider_id=${result.route?.providerId || null},provider_message_id=${result.messageId || null} WHERE id=${id}`);
         if (result.ok) await db.exec(sql`UPDATE mail_person_daily SET accepted=accepted+1 WHERE owner_subject=${owner} AND day=${day}`);
         results.push({ id, to, status: state, reason: result.ok ? null : String(result.reason || 'The provider refused this message.').slice(0,180) });
     }
     return { status: results.every((r) => r.status === 'accepted') ? 200 : 207, results, remaining: Math.max(0,limit-(await db.maybe(sql`SELECT attempts FROM mail_person_daily WHERE owner_subject=${owner} AND day=${day}`)).attempts) };
 }
 
-module.exports = { cleanAddress, validateName, dailyLimit, paused, createAddress, senderAllowed, buildMessage, send };
+module.exports = { cleanAddress, validateName, dailyLimit, paused, createAddress, senderAllowed, buildMessage, spamThresholds, validateSpamThresholds, saveSpamThresholds, send };
