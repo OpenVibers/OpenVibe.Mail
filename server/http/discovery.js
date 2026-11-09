@@ -11,9 +11,22 @@ const contracts = require('openvibe-contracts');
 const seo = require('openvibe-shared/seo');
 
 const SITE_NAME = 'OpenVibe.Mail';
-const SUMMARY = 'Ten-minute addresses that show you the code, and inboxes your agents can read. Receive only: nothing here sends mail.';
-const DETAILS = 'OpenVibe.Mail (openvibe.email) is the mail service of the OpenVibe network. M1 has one public page, /, and a JSON API at /api/v1 that needs a person\'s Network token. A ten-minute address works with no account; signing in adds your masks and your agents\' inboxes. A message body is never displayed in full: the burner page shows the code, the sender and the time.';
-const PAGE_TEXT = 'An address for every sign-up. A ten-minute address shows the code a site sends and then deletes itself. Masks give a different address per site and deliver to your inbox, so a leak never learns your real one. Inboxes let an agent have its own address for sign-ups and codes, so it never needs yours. Receive only: nothing here sends mail, and a message body is never shown in full. Sign in with your OpenVibe account to keep masks and agent inboxes; a ten-minute address needs no account.';
+const { mailCopy } = require('./mail-copy');
+
+/** The words the agent files use: the home page's own (server/http/mail-copy.js), so both follow MAIL_OUTBOUND. */
+function words(config) {
+    const c = mailCopy(config);
+    return {
+        summary: c.summary,
+        details: `OpenVibe.Mail (openvibe.email) is the mail service of the OpenVibe network. Its public page is /, and its JSON API at /api/v1 needs a person's Network token. ${c.sendRule}`,
+        page: `An address for every sign-up. ${c.summary} A ten-minute address shows the code a site sends and then deletes itself; it needs no account. `
+            + 'Your address: a name at openvibe.email, aliases and your own domain, all into one inbox with trackers off until you say, '
+            + `and another mailbox brought in over IMAP, read only. ${c.sendLine} Masks give a different address per site and deliver `
+            + 'to your inbox, so a leak never learns your real one. Inboxes let an agent have its own address for sign-ups and codes. '
+            + 'Inbox AI is off until you turn it on, and a draft is never sent until you press Send. A message body stays in its '
+            + 'mailbox: never in a log, an event or a page.',
+    };
+}
 
 const METHODS = new Set(['get', 'put', 'post', 'delete', 'patch', 'head', 'options']);
 
@@ -40,6 +53,7 @@ function publicDocument() {
 
 function createDiscoveryRoutes({ config }) {
     const base = String(config.baseUrl || 'https://openvibe.email').replace(/\/+$/, '');
+    const said = words(config);
     const r = express.Router();
     const CACHE = 'public, max-age=3600';
 
@@ -48,7 +62,7 @@ function createDiscoveryRoutes({ config }) {
         site: 'openvibe.email',
         id: 'mail',
         name: SITE_NAME,
-        purpose: SUMMARY,
+        purpose: said.summary,
         home: base,
         api: `${base}/api/v1`,
         openapi: `${base}/openapi.json`,
@@ -75,11 +89,11 @@ function createDiscoveryRoutes({ config }) {
     // is off: this site has no Markdown twins.
     r.get('/llms.txt', (_req, res) => res.type('text/plain').set('Cache-Control', CACHE).send(seo.llmsTxt({
         name: SITE_NAME,
-        summary: SUMMARY,
-        details: DETAILS,
+        summary: said.summary,
+        details: said.details,
         sections: [
             { title: 'Start here', links: [
-                { title: SITE_NAME, url: `${base}/`, note: 'a ten-minute address that shows the code' },
+                { title: SITE_NAME, url: `${base}/`, note: 'your address, masks, ten-minute addresses and agent inboxes' },
                 { title: 'OpenAPI 3.1 document', url: `${base}/openapi.json`, note: 'every public API route, with its fields' },
                 { title: 'Agent descriptor', url: `${base}/.well-known/agent.json` },
                 { title: 'Health', url: `${base}/api/health` },
@@ -94,11 +108,11 @@ function createDiscoveryRoutes({ config }) {
     // /llms-full.txt (SEO-33): the same, with the public page's text.
     r.get('/llms-full.txt', (_req, res) => res.type('text/plain').set('Cache-Control', CACHE).send(seo.llmsFull({
         site: SITE_NAME,
-        summary: SUMMARY,
+        summary: said.summary,
         base,
         maxBytes: 512 * 1024,
         sections: [{ title: 'Pages', pages: [
-            { title: SITE_NAME, url: '/', text: PAGE_TEXT },
+            { title: SITE_NAME, url: '/', text: said.page },
             { title: 'The API', url: '/openapi.json', text: 'The JSON API is at /api/v1 and needs a person\'s OpenVibe Network token: masks, burners, agent inboxes, their messages and the verification code. The OpenAPI document lists every public route and its fields. Uploads and the local mail server are not HTTP.' },
         ] }],
     })));
@@ -106,4 +120,4 @@ function createDiscoveryRoutes({ config }) {
     return r;
 }
 
-module.exports = { createDiscoveryRoutes, publicDocument, SITE_NAME, SUMMARY, DETAILS };
+module.exports = { createDiscoveryRoutes, publicDocument, SITE_NAME };

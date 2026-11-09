@@ -16,7 +16,8 @@ test('the agent files describe only the public page and API', async (t) => {
     assert.strictEqual(llms.status, 200);
     assert.match(llms.headers.get('content-type'), /^text\/plain/);
     assert.ok(llms.text.startsWith('# OpenVibe.Mail\n'), 'llms.txt starts with the site heading');
-    assert.ok(llms.text.includes('> Ten-minute addresses'), 'it says what the site is');
+    assert.ok(llms.text.includes('> Your own address and domain, masks'), 'it says what the site is, in the home page\'s words');
+    assert.doesNotMatch(llms.text, /Receive only|nothing here sends mail|M1 has/, 'no stale words from before person mail');
     for (const url of ['https://openvibe.email/', 'https://openvibe.email/openapi.json', 'https://openvibe.email/.well-known/agent.json', 'https://openvibe.email/llms-full.txt']) {
         assert.ok(llms.text.includes(url), `llms.txt links ${url}`);
     }
