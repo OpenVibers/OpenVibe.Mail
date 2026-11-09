@@ -63,8 +63,13 @@ const CSP = [
 ].join('; ');
 
 const BODY = fs.readFileSync(path.join(__dirname, '..', 'views', 'home.html'), 'utf8');
+const { mailCopy } = require('./mail-copy');
+const escHtml = (v) => String(v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 function homePage(config) {
+    const words = mailCopy(config);
+    const body = BODY.replace('{{LEAD}}', escHtml(words.summary)).replace('{{SEND_LINE}}', escHtml(words.sendLine))
+        .replace('{{SEND_RULE}}', escHtml(words.sendRule));
     const base = String(config.baseUrl || 'https://openvibe.email').replace(/\/+$/, '');
     const nav = {
         service: SERVICE,
@@ -82,7 +87,7 @@ function homePage(config) {
         lang: 'en',
         title: `${SITE_NAME}: an address for every sign-up`,
         siteName: SITE_NAME,
-        description: 'Ten-minute addresses that show you the code, and inboxes your agents can read. Receive only: nothing here sends mail.',
+        description: words.description,
         canonical: `${base}/`,
         robots: 'index, follow',
         jsonLd: [{ '@context': 'https://schema.org', '@type': 'WebApplication', name: SITE_NAME, url: `${base}/`, applicationCategory: 'CommunicationApplication', offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' } }],
@@ -96,7 +101,7 @@ function homePage(config) {
 <script src="${asset('js/mail.js')}" defer></script>`,
         body: `<a class="skip" href="#main">Skip to content</a>
 <div id="navbar-mount"></div>
-${BODY}
+${body}
 <script>
 window.__OV_PAGE = ${JSON.stringify({ navbar: nav, footer }).replace(/</g, '\\u003c')};
 document.addEventListener('DOMContentLoaded', function () {
