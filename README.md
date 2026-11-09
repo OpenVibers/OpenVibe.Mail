@@ -218,6 +218,6 @@ Stalwart.
 
 <!-- versions:start -->
 - openvibe-contracts: v0.373.0
-- openvibe-sdk: v0.123.0
+- openvibe-sdk: v0.125.0
 - openvibe-shared: v4.173.0
 <!-- versions:end -->
