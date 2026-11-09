@@ -97,8 +97,8 @@ function createFakeStalwart() {
         },
 
         // ---- reading (M1.5): the same rules as the real client (server/stalwart/client.js) ----
-        async readMessages({ mailboxAddress, recipient = null, position = 0, limit = 50 }) {
-            const all = [...(mailboxes.get(String(mailboxAddress || '').toLowerCase()) || [])].reverse();
+        async readMessages({ mailboxAddress, recipient = null, position = 0, limit = 50, filter = null }) {
+            const all = [...(mailboxes.get(String(mailboxAddress || '').toLowerCase()) || [])].reverse().filter((m) => !m.trashed && matches(m,filter));
             const wanted = recipient ? String(recipient).trim().toLowerCase() : null;
             const stamped = (m) => { const f = (m.headers || []).find((h) => String(h && h.name || '').toLowerCase() === 'delivered-to'); return f ? String(f.value || '').trim().toLowerCase() : null; };
             const picked = [];
@@ -106,7 +106,7 @@ function createFakeStalwart() {
             for (const m of all.slice(position)) {
                 used += 1;
                 if (wanted && stamped(m) !== wanted) continue;
-                picked.push({ id: m.id, from: m.from.map((a) => a.email), to: [stamped(m)], subject: m.subject, receivedAt: m.receivedAt, unread: !m.seen, hasAttachment: Boolean((m.attachments || []).length), spam: false });
+                picked.push({ id: m.id, threadId:m.threadId || m.id, keywords:m.keywords || {}, from: m.from.map((a) => a.email), to: [stamped(m)], subject: m.subject, receivedAt: m.receivedAt, unread: !m.seen, hasAttachment: Boolean((m.attachments || []).length), spam: false });
                 if (picked.length >= limit) break;
             }
             return { messages: picked, next: position + used < all.length ? position + used : null };
@@ -135,6 +135,16 @@ function createFakeStalwart() {
             const m = (mailboxes.get(String(mailboxAddress || '').toLowerCase()) || []).find((x) => x.id === id && !x.trashed);
             const a = m && (m.attachments || []).find((x) => x.part === String(part));
             return a ? { name: a.name, type: a.type, bytes: a.bytes } : null;
+        },
+        async setKeywords({ mailboxAddress, id, keywords }) {
+            const m = (mailboxes.get(String(mailboxAddress).toLowerCase()) || []).find((x) => x.id === id && !x.trashed);
+            if (!m) return false;
+            m.keywords = m.keywords || {};
+            for (const [key,value] of Object.entries(keywords)) { if (value) m.keywords[key] = true; else delete m.keywords[key]; }
+            return true;
+        },
+        async readThread({ mailboxAddress, id }) {
+            return (mailboxes.get(String(mailboxAddress).toLowerCase()) || []).filter((m) => !m.trashed && (m.threadId || m.id) === id).map((m) => m.id);
         },
         async setSeen({ mailboxAddress, id, seen }) {
             const m = (mailboxes.get(String(mailboxAddress || '').toLowerCase()) || []).find((x) => x.id === id && !x.trashed);
@@ -181,3 +191,17 @@ function createFakeStalwart() {
 }
 
 module.exports = { createFakeStalwart };
+
+function matches(m, filter) {
+    if (!filter) return true;
+    if (filter.operator === 'AND') return filter.conditions.every((f) => matches(m,f));
+    return Object.entries(filter).every(([key,value]) => {
+        if (key === 'hasKeyword') return !!m.keywords?.[value];
+        if (key === 'notKeyword') return !m.keywords?.[value];
+        if (key === 'hasAttachment') return !!m.attachments?.length === value;
+        if (key === 'after') return m.receivedAt >= value;
+        if (key === 'before') return m.receivedAt < value;
+        const field = key === 'text' ? [m.subject,m.text,...m.from.map((a) => a.email),...m.to.map((a) => a.email)].join(' ') : Array.isArray(m[key]) ? m[key].map((a) => a.email).join(' ') : String(m[key] || '');
+        return field.toLowerCase().includes(value.toLowerCase());
+    });
+}

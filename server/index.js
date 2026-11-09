@@ -57,6 +57,7 @@ async function main() {
     // Inbox AI's other inbox: a connected mailbox is read when its own next_sync_at is due. Without MAIL_SECRETS_KEY
     // there is nothing to open, and the job is a no-op.
     const imapPull = startImapPullJob({ db, config, log });
+    const workspace = require('./jobs/workspace').startWorkspaceJob({ db, stalwart, config, log });
     const forwarding = startForwardingJob({ db, stalwart, config, log });
 
     const { app } = await createApp({ config, store, stalwart, events, log });
@@ -71,6 +72,7 @@ async function main() {
         agentMail.stop();
         inboxAi.stop();
         imapPull.stop();
+        workspace.stop();
         forwarding.stop();
         events.stop();
         server.close(() => {

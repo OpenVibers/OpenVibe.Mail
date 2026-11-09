@@ -72,6 +72,7 @@ async function createApp(opts = {}) {
     app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
     // Amazon SNS posts its JSON as text/plain; every other provider sends application/json.
     app.use('/api/v1/mail/provider-webhooks', express.json({ type: ['application/json', 'text/plain'], limit: '256kb', verify: (req, _res, buffer) => { req.rawBody = Buffer.from(buffer); } }));
+    app.use('/api/v1/me/mail/workspace/send', express.json({ limit: '15mb' }));
     app.use(express.json({ limit: '16kb' }));
     // Nothing here is cacheable: a person's addresses and sign-in are private, and a machine answer is live.
     app.use(['/api', '/auth'], (_req, res, next) => {
