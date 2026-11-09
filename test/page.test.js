@@ -34,10 +34,15 @@ test('/ is the page: the ten-minute address, the honest cards, the navbar, a str
     for (const marker of ['data-mail-burner', 'Get a 10-minute address', 'data-mail-mine', 'Inboxes for your agents', 'navbar-mount', '/shared/']) {
         assert.ok(r.text.includes(marker), marker);
     }
-    // Masks and the inbox work since M1.5: no card says Later, and both lead to /inbox; sending is said to come next.
+    // Masks, your address and the inbox work: no card says Later, and two lead to /inbox. With MAIL_OUTBOUND off (the
+    // default) the page says sending to other providers opens next and never "Receive only" or "your own domain comes
+    // next" (both stale since 11-08); the description says the same.
     assert.strictEqual((r.text.match(/class="ml-soon">Later</g) || []).length, 0);
     assert.strictEqual((r.text.match(/href="\/inbox"/g) || []).length, 2);
-    assert.match(r.text, /Sending and your own domain come next/);
+    assert.match(r.text, /Your address<\/h3><p>A name at openvibe\.email, aliases, and your own domain/);
+    assert.match(r.text, /sending and forwarding to other providers open next/);
+    assert.match(r.text, /<meta name="description" content="[^"…]*Mail arrives today; sending opens next\.">/);
+    assert.doesNotMatch(r.text, /Receive only|your own domain come next|\{\{[A-Z_]+\}\}/);
     assert.doesNotMatch(r.text, /<form[^>]*action="\/api/, 'nothing posts to the API without the script');
     const csp = r.headers.get('content-security-policy') || '';
     assert.match(csp, /frame-ancestors 'none'/);
@@ -82,4 +87,16 @@ test('/release.json is the release manifest open tabs poll, never cached', async
     assert.strictEqual(m.service, 'mail');
     assert.ok(typeof m.release === 'string' && m.release.length > 0, 'the deployed commit');
     assert.ok(m.packages && m.packages['openvibe-shared'], 'the platform packages it runs');
+});
+
+test('with sending on, the page says how sending works instead of "opens next"', () => {
+    const { mailCopy } = require('../server/http/mail-copy');
+    const on = mailCopy({ outbound: { enabled: true } });
+    const off = mailCopy({ outbound: { enabled: false } });
+    assert.match(on.sendLine, /up to 10 recipients a message, 20 a day to start/);
+    assert.match(on.sendRule, /checked for spam before it leaves/);
+    assert.doesNotMatch(`${on.description} ${on.sendLine} ${on.sendRule}`, /opens? next|closed/);
+    assert.match(off.sendRule, /closed for now/);
+    assert.strictEqual(on.summary, off.summary, 'what the site is does not change with the switch');
+    for (const d of [on.description, off.description]) assert.ok(d.length <= 158, `the description fits the shell: ${d.length}`);
 });
