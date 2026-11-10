@@ -1,0 +1,18 @@
+cff-version: 1.2.0
+message: "If you use OpenVibe.Mail in research or a product, cite it as below."
+title: openvibe-mail
+type: software
+authors:
+  - name: OpenVibe
+    alias: OpenVibers
+    website: https://openvibe.network
+repository-code: https://github.com/OpenVibers/OpenVibe.Mail
+url: https://openvibe.email
+license: AGPL-3.0-only
+abstract: "Email masks, self-destructing burners and an inbox for every agent, at openvibe.email."
+keywords:
+  - openvibe
+  - burner-email
+  - email
+  - imap
+  - mail

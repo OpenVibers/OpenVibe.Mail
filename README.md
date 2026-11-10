@@ -2,6 +2,9 @@
 
 `openvibe.email` — masks that protect you, burners that self-destruct, and an inbox for every agent.
 
+**Live site:** https://openvibe.email · **API docs:** https://openvibe.services · **For AI:** https://openvibe.email/llms.txt
+**Run it:** `npm ci && npm start` (Node 22 or newer) · **Tests:** `npm test`
+
 Mail receives mail for OpenVibe mailboxes and includes opt-in Inbox AI, which can also pull another provider's
 mailbox over IMAP (TLS only, read only, app password sealed with `MAIL_SECRETS_KEY`). Replies stay drafts until the
 person edits and clicks Send; external delivery remains closed unless the configured outbound relay is enabled. See
