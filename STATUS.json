@@ -7,7 +7,7 @@
   "runtime": "node 22, express, PostgreSQL 18 (openvibe-sdk/db), Stalwart Community 1.0.3 (AGPL-3.0-only), local filesystem blobs (S3 optional)",
   "port": 5250,
   "domain": "openvibe.email; receive-only MX. The API is public through nginx (deploy/nginx/openvibe.email.conf); no UI yet.",
-  "contracts": "openvibe-contracts v0.373.0",
+  "contracts": "openvibe-contracts v0.384.0",
   "sdk": "openvibe-sdk v0.125.0",
   "shared": "openvibe-shared v4.179.0",
   "contractsProposed": [],
@@ -86,5 +86,5 @@
     "delivery": "a reply to the owner's own openvibe.email addresses (mailbox, masks, burners) is handed to the mail server over loopback SMTP. Sending outside OpenVibe is not ours yet (plan M2, waiting on the owner): MAIL_OUTBOUND=on is the only way on and it is OFF by default, so with it off such a reply opens no connection and answers 409 mail.outbound_closed, which the agent's system turns into the person's send approval (the reply waits, nothing is sent, nothing is lost)",
     "outbound": "GET /internal/mail/outbound says whether Mail may send outside OpenVibe, so an approval card can say plainly that the reply will wait"
   },
-  "updated": "2026-11-09"
+  "updated": "2026-11-10"
 }
