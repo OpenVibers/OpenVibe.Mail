@@ -608,7 +608,17 @@
     current = new URLSearchParams(location.search).get('address') || 'all';
     paintToolbar();
     paintSide();
-    api('/api/v1/me/mail/workspace/settings').then(function (b) { workspace = b; if (settingsPage) paintSide(); else paintFolders(); }).catch(function (err) { notice(err.message); });
+    api('/api/v1/me/mail/workspace/settings').then(function (b) {
+      workspace = b; if (settingsPage) paintSide(); else paintFolders();
+      // /inbox?compose=1&to=…&subject=…&body=… opens the composer filled in, once the addresses are known; the address
+      // bar forgets it, so a reload does not open it again. Nothing is sent until the person presses Send.
+      var pre = !settingsPage && window.MailCompose.fromQuery ? window.MailCompose.fromQuery(location.search) : null;
+      if (pre) {
+        var keep = new URLSearchParams(location.search); ['compose','to','cc','subject','body'].forEach(function (k) { keep.delete(k); });
+        history.replaceState(null, '', location.pathname + (keep.toString() ? '?' + keep.toString() : '') + location.hash);
+        compose(pre);
+      }
+    }).catch(function (err) { notice(err.message); });
     if (settingsPage) loadPersonControls().then(paintSide).catch(function () {});
     loadAiControls().then(function () {
       paintSide();
