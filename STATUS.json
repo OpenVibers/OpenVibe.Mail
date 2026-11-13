@@ -6,7 +6,7 @@
   "plan": "OpenVibe Seven Domains Plan (2026-11-07) §8, M1: Stalwart receiving, masks, burners and agent inboxes; HO6 (channels): an agent answers the mail sent to its own address",
   "runtime": "node 22, express, PostgreSQL 18 (openvibe-sdk/db), Stalwart Community 1.0.3 (AGPL-3.0-only), local filesystem blobs (S3 optional)",
   "port": 5250,
-  "domain": "openvibe.email; receive-only MX. The API is public through nginx (deploy/nginx/openvibe.email.conf); no UI yet.",
+  "domain": "openvibe.email; receive-only MX. The API and the pages are public through nginx (deploy/nginx/openvibe.email.conf): a home page at /, the signed-in inbox at /inbox (and /inbox/settings), and the owner's provider panel at /admin/mail/providers.",
   "contracts": "openvibe-contracts v0.419.0",
   "sdk": "openvibe-sdk v0.161.0",
   "shared": "openvibe-shared v4.238.0",
@@ -54,8 +54,8 @@
     "frontdoor": "node test/frontdoor.test.js (CORS allow-list, same-site cookie write rule, /me/mail)",
     "imap": "node test/imap.test.js (TLS required, private target refused, the seal is not returned or logged, UID resume, UIDVALIDITY reset, disconnect with and without the pulled summaries)"
   },
-  "deployed": false,
-  "deployment": "M1 is deliberately not deployed by this job. Opus installs it on the host; docs/INSTALL.md has the steps and docs/DNS.md the records.",
+  "deployed": true,
+  "deployment": "Public at https://openvibe.email: deployed with ovhost deploy mail (docs/INSTALL.md has the steps and docs/DNS.md the records). The unit runs as the house user on 127.0.0.1:5250 with the env in /etc/openvibe/mail.env.",
   "security": [
     "the API is behind OpenVibe.Network auth; typed tokens are refused",
     "someone else's address is 404, never 403",
@@ -72,9 +72,9 @@
       "/api/ready",
       "/auth/"
     ],
-    "placeholder": "/ answers a placeholder page until the UI lands",
+    "pages": "/ is the home page, /inbox and /inbox/settings are the signed-in person's inbox, /admin/mail/providers is the owner's panel",
     "nginx": "deploy/nginx/openvibe.email.conf",
-    "cors": "Bearer from any first-party origin in the Contracts manifests; cookie writes only same-origin on openvibe.email",
+    "cors": "Bearer from any first-party origin in the Contracts manifests; cookie writes only same-origin on openvibe.email; the browser extension's own origin when MAIL_EXTENSION_ORIGINS names it",
     "trustProxy": 2
   },
   "agentMail": {

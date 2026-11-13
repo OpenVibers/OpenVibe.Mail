@@ -37,6 +37,26 @@ function domain(name, fallback) {
     return v;
 }
 
+/**
+ * The browser extension's origins, from MAIL_EXTENSION_ORIGINS only.
+ *
+ * An exact chrome-extension://<id> (32 letters a-p), the literal moz-extension://* (Firefox gives every
+ * install a different random origin) or one exact moz-extension://<uuid> for a single install. Anything else is
+ * refused: an https origin in this list would let a website read the masks of a signed-in person.
+ */
+function extensionOrigins() {
+    const out = [];
+    for (const value of list('MAIL_EXTENSION_ORIGINS')) {
+        if (value === 'moz-extension://*') { out.push(value); continue; }
+        if (value.startsWith('moz-extension://') && /^moz-extension:\/\/[0-9a-f-]{36}$/.test(value)) { out.push(value); continue; }
+        if (!/^chrome-extension:\/\/[a-p]{32}$/.test(value)) {
+            throw new Error('MAIL_EXTENSION_ORIGINS must hold chrome-extension://<id> values or moz-extension://*');
+        }
+        out.push(value);
+    }
+    return out;
+}
+
 /** A 32-byte key, base64 or hex, kept as the environment gave it. Never printed and never part of an answer. */
 function secretKey(name) {
     const raw = String(env[name] || '').trim();
@@ -91,7 +111,11 @@ function load(overrides = null) {
         // The browser extension's origins, allowed by CORS on the mask routes: exact
         // chrome-extension://<id> values, or the literal pattern moz-extension://* (Firefox gives every
         // install a random origin). Empty: no extension may call this API from a page.
-        extensionOrigins: list('MAIL_EXTENSION_ORIGINS'),
+        //
+        // The names come from the environment only (MAIL_EXTENSION_ORIGINS): no store id is written in
+        // this code, because the id belongs to the owner's store listing and may change with it. A value
+        // that is not an extension origin is refused here rather than quietly opening the API to a site.
+        extensionOrigins: extensionOrigins(),
 
         network: {
             url: env.OV_NETWORK_URL || 'https://openvibe.network',

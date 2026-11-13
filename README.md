@@ -72,6 +72,12 @@ handshake). A cross-origin browser may send a Bearer token from any first-party 
 token must name the person it acts for (`on_behalf_of`) and carry `mail.addresses.write` or
 `mail.messages.read`. A typed token (a `typ` or `purpose` claim) is refused.
 
+The browser extension (the OpenVibe Companion) has its own origin, and the service answers it only when the
+owner names it in `MAIL_EXTENSION_ORIGINS` (see `.env.example`). The names come from the environment alone: no
+store id is written in this code, because the id belongs to the owner's store listing and may change with it.
+Values that are not extension origins are refused at start-up, so an https origin in the list cannot open the
+masks to a website.
+
 | Method | Route | Who |
 |---|---|---|
 | `GET` | `/me/mail` | a person; masks, burners and agent inboxes with state, expiry and counts (see below) |
