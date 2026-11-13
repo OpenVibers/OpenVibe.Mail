@@ -8,7 +8,7 @@
   "port": 5250,
   "domain": "openvibe.email; receive-only MX. The API and the pages are public through nginx (deploy/nginx/openvibe.email.conf): a home page at /, the signed-in inbox at /inbox (and /inbox/settings), and the owner's provider panel at /admin/mail/providers.",
   "contracts": "openvibe-contracts v0.419.0",
-  "sdk": "openvibe-sdk v0.166.0",
+  "sdk": "openvibe-sdk v0.167.0",
   "shared": "openvibe-shared v4.245.0",
   "contractsProposed": [],
   "stalwart": {
