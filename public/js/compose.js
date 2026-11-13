@@ -112,5 +112,18 @@
     d.appendChild(form); document.body.appendChild(d); d.showModal(); to.focus();
     d.addEventListener('keydown',function (e) { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); form.requestSubmit(); } });
   }
-  window.MailCompose = { open:open,preview:preview,toFile:toFile };
+  /**
+   * A link that opens the composer already filled in (11-13: an agent's draft card in Actor, or any site's "write to"):
+   * /inbox?compose=1&to=a@b.c,d@e.f&cc=&subject=&body=. Only fills the box: nothing leaves until the person presses Send.
+   * → the payload for open(), or null when the address does not ask for one. Bounded: 20 addresses a field, a 500-character
+   * subject, a 20,000-character body; an address that does not look like one is dropped.
+   */
+  function fromQuery(search) {
+    var q = new URLSearchParams(search || '');
+    if (q.get('compose') !== '1') return null;
+    function list(v) { return String(v || '').split(/[,;\s]+/).map(function (a) { return a.trim(); }).filter(function (a) { return /^[^\s@<>"]{1,64}@[^\s@<>"]{1,255}$/.test(a); }).slice(0, 20); }
+    var p = { to:list(q.get('to')), cc:list(q.get('cc')), bcc:[], subject:String(q.get('subject') || '').slice(0, 500), text:String(q.get('body') || '').slice(0, 20000) };
+    return p;
+  }
+  window.MailCompose = { open:open,preview:preview,toFile:toFile,fromQuery:fromQuery };
 })();
