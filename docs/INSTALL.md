@@ -278,8 +278,9 @@ server_name openvibe.email;                      # port 443: the API and the sig
 
 The host's `/etc/nginx/conf.d/cloudflare-realip.conf` (included globally from `nginx.conf`) restores the person's
 address from `CF-Connecting-IP` for every vhost; this file does not repeat it, like the rest of the house. Only
-`/api/v1/`, `/api/health`, `/api/ready` and the Network sign-in routes (`/auth/`) are proxied to the Mail service;
-`/` is the placeholder until the page lands.
+`/api/v1/`, `/api/health`, `/api/ready` and the Network sign-in routes (`/auth/`) are proxied to the Mail service, and
+so are the pages: `/` (the home page), `/inbox` and `/inbox/settings` (the signed-in person's mailbox) and
+`/admin/mail/providers` (the owner's panel).
 
 Register the Network OAuth client for `mail` with redirect `https://openvibe.email/auth/callback`, and put its
 secret in `OV_OAUTH_CLIENT_SECRET` in `/etc/openvibe/mail.env`, or sign-in cannot finish.
@@ -315,14 +316,15 @@ the public door answers:
 ```sh
 curl -fsS https://openvibe.email/api/health
 curl -fsS https://openvibe.email/api/ready
-curl -fsS -o /dev/null -w '%{http_code}\n' https://openvibe.email/           # 200 placeholder
+curl -fsS -o /dev/null -w '%{http_code}\n' https://openvibe.email/           # 200 home page
+curl -fsS -o /dev/null -w '%{http_code}\n' https://openvibe.email/inbox       # 302 to sign-in
 curl -fsS -o /dev/null -w '%{http_code}\n' https://openvibe.email/api/v1/masks # 401 without a token
 ```
 
 ## 12. Firewall and things not to do
 
 - Allow inbound TCP 25 only. Do not open 587 or 465: there is no submission listener and no relay.
-- Keep 8080, 143 and 5250 on loopback. The public API is whatever nginx/Network fronts; M1 has no public site.
+- Keep 8080, 143 and 5250 on loopback. The public API and the pages are whatever nginx/Network fronts.
 - Do not add a second MX or an outbound SMTP path. Sending is M3.
 - Do not run Stalwart as root; the unit keeps only `CAP_NET_BIND_SERVICE` for port 25.
 - The memory cap is the slice's (`/etc/systemd/system/openvibe-stalwart.slice`). The host OOMed on 2026-11-07; do

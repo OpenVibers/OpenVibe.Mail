@@ -8,8 +8,8 @@
  *   /auth/*                            Network SSO with PKCE (openvibe-sdk/sso)
  *   /api/v1/masks, /burners, …         the API (http/api.js)
  *
- * There are no pages: M1 has no site, only an API for the apps and the agents of the house. nginx answers `/` with
- * a placeholder until the page lands.
+ * The pages: `/` is the home page, `/inbox` and `/inbox/settings` are the signed-in person's mailbox, and
+ * `/admin/mail/providers` is the owner's panel (server/http/pages.js). nginx proxies them to this service.
  *
  * Nothing here logs a request body. A request body of this service may carry a person's label for a mask; a
  * message body never reaches this process at all, and the one place a body is read (the code extractor) throws it

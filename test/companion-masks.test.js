@@ -96,3 +96,14 @@ test('without the setting, no extension origin is allowed', async (t) => {
     const ok = await s.get('/api/v1/masks', { bearer: s.network.dockToken(alice), origin: EXTENSION_ORIGIN });
     assert.strictEqual(ok.headers.get('access-control-allow-origin'), null);
 });
+
+test('the origins come from the environment only, and a website origin in the list is refused', async (t) => {
+    // No store id is written in the code: the list is the environment's, and the service checks it is an
+    // extension origin before it opens anything. A website origin would let a site read a person's masks.
+    const configLib = require('../server/config');
+    const env = (origins) => ({ NODE_ENV: 'test', MAIL_BASE_DOMAIN: 'openvibe.email', MAIL_MASK_DOMAIN: 'mask.openvibe.email', BURNER_DOMAINS: 'burn1.openvibe.email', MAIL_EXTENSION_ORIGINS: origins });
+    const config = configLib.load(env(`${EXTENSION_ORIGIN},moz-extension://*`));
+    assert.deepStrictEqual(config.extensionOrigins, [EXTENSION_ORIGIN, 'moz-extension://*']);
+    assert.throws(() => configLib.load(env('https://evil.example.net')), /MAIL_EXTENSION_ORIGINS/);
+    assert.throws(() => configLib.load(env('chrome-extension://not-an-id')), /MAIL_EXTENSION_ORIGINS/);
+});
