@@ -57,3 +57,5 @@
 
 .ml-card-link { font-weight: 750; color: var(--accent, #3b82f6); text-decoration: none; }
 .ml-card-link:hover, .ml-card-link:focus-visible { text-decoration: underline; }
+/* Design rule 201: the intro is one line on a computer, at most two on a phone. */
+@media (max-width: 640px) { .ml-lead { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; } }
