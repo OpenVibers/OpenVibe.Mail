@@ -30,6 +30,7 @@ const { createServiceReadiness } = require('./observability');
 const { createStalwartClient } = require('./stalwart/client');
 const { createEvents } = require('./events');
 const { createSsoClient } = require('openvibe-sdk/sso');
+const settingsLib = require('./config-store');
 
 const VERSION = require('../package.json').version;
 const ROOT = require('path').join(__dirname, '..');
@@ -63,6 +64,20 @@ async function createApp(opts = {}) {
         fetch: fetchImpl,
         log,
     });
+
+    // The owner's settings (the Setup tab, plan §AB.16 and §AB.18): the mail provider keys and the DNS check
+    // of a sending domain, read through openvibe-shared/config. A failure leaves Mail serving and says why.
+    let settings = null;
+    if (opts.settings) settings = opts.settings;
+    else {
+        try {
+            const made = settingsLib.createSettings({ db: store.db, config, env: opts.env || process.env, log, fetchImpl });
+            await made.ready;
+            settings = made;
+        } catch (err) {
+            log.warn('[OpenVibe.Mail] owner settings unavailable:', err && err.message);
+        }
+    }
 
     const app = express();
     app.disable('x-powered-by');
@@ -123,6 +138,30 @@ async function createApp(opts = {}) {
         }),
     }));
 
+    // ── The owner's settings (openvibe-shared/config): Network's admin proxy, acting for the owner, reads and
+    // writes mail.sending, mail.receiving and mail.dns. Internal only, guarded by mail.config.manage; a secret
+    // change needs X-OV-Fresh: 1.
+    if (settings) {
+        const internalOnly = (req, res, next) => {
+            if (req.headers['x-forwarded-for'] || req.headers['x-real-ip'] || req.headers['cf-connecting-ip']) {
+                return res.status(404).json({ code: 'mail.not_found', error: 'no such route' });
+            }
+            return next();
+        };
+        const configCapability = (req, res, next) => {
+            const p = req.principal;
+            if (!p || p.kind !== 'app' || !String(p.requester || '').startsWith('service:')) {
+                return res.status(401).json({ code: 'token.required', error: 'a Network service token with mail.config.manage is required' });
+            }
+            const decision = contracts.capabilities.check(p.claims, 'mail.config.manage');
+            const granted = decision.allowed || contracts.capabilities.grants(p.claims.cap, 'mail.config.manage');
+            if (!granted) return res.status(403).json({ code: 'capability.denied', error: 'mail.config.manage is not granted' });
+            return next();
+        };
+        app.use('/internal/config', express.json({ limit: '64kb' }));
+        settings.mount(app, { guard: [internalOnly, principal.middleware, configCapability], log });
+    }
+
     app.use('/api/v1', principal.middleware);
     app.use(createApi({ db: store.db, config, stalwart, events, principal, log, smtp: opts.smtp || null, fetchImpl, imap: opts.imap || null }));
 
@@ -152,7 +191,7 @@ async function createApp(opts = {}) {
         return contracts.http.sendProblem(res, 500, 'internal.error', { detail: 'Internal error.', ctx: req.ov });
     });
 
-    return { app, ctx: { config, store, keys, stalwart, events, principal, sso, log } };
+    return { app, ctx: { config, store, keys, stalwart, events, principal, sso, settings, log } };
 }
 
 module.exports = { createApp, VERSION };
