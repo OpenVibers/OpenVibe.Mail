@@ -304,6 +304,36 @@ test('the test route answers one line, in the shape the Setup tab reads', async 
     }
 });
 
+test('the Setup tab sees the three mail namespaces, each with its rows', async () => {
+    const { settings } = await makeSettings();
+    const app = express();
+    app.use(express.json({ limit: '64kb' }));
+    settings.mount(app, { guard: (req, res, next) => next(), log: quiet });
+    const server = await new Promise((resolve) => {
+        const s = http.createServer(app);
+        s.listen(0, '127.0.0.1', () => resolve(s));
+    });
+    const base = `http://127.0.0.1:${server.address().port}`;
+    try {
+        const res = await fetch(`${base}/internal/config`, { headers: { accept: 'application/json' } });
+        const body = await res.json();
+        assert.strictEqual(res.status, 200);
+        const namespaces = (body.namespaces || []).map((item) => item.namespace).sort();
+        assert.deepStrictEqual(namespaces, ['mail.dns', 'mail.receiving', 'mail.sending'], 'the three namespaces are listed');
+        for (const item of body.namespaces) {
+            assert.strictEqual(item.service, 'mail', 'the summary names Mail as its service');
+            const rows = Object.entries(item.schema.properties || {}).filter(([, prop]) => prop['x-owner-input']);
+            assert.ok(rows.length, `${item.namespace} has rows for the Setup tab`);
+            for (const [key, prop] of rows) {
+                assert.strictEqual(prop['x-owner-input'].group, 'email', `${item.namespace}.${key} is in the email group`);
+                assert.ok(prop.title && prop.description, `${item.namespace}.${key} has a title and a description`);
+            }
+        }
+    } finally {
+        await new Promise((resolve) => server.close(resolve));
+    }
+});
+
 (async () => {
     let failed = 0;
     for (const t of tests) {
