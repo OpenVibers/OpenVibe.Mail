@@ -49,8 +49,8 @@ const SENDING_PROVIDERS = [
         group: 'Sending mail',
         requiredFor: 'Sending mail through Postmark',
         unlocks: 'Lets OpenVibe.Mail send your mail through Postmark. The token is kept in the vault and the test asks Postmark which senders it knows, so you can see it works; sending itself is the next step.',
-        get_it_at: 'https://postmarkapp.com/developer/api/account/server-tokens',
-        get_it_how: 'Open the server tokens page, click Add Server Token, give it a name, and copy the token it shows (it starts with a long random string).',
+        get_it_at: 'https://account.postmarkapp.com/servers',
+        get_it_how: 'Open your servers, pick the one that sends this mail, open its API Tokens tab, click Add Server Token, give it a name, and copy the token it shows.',
         spfInclude: 'postmarkapp.com',
         keys: [
             { name: 'postmark_server_token', local: 'serverToken', title: 'Postmark server token', secret: true, required: true, example: '…',
