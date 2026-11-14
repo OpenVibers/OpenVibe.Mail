@@ -165,4 +165,4 @@ async function sendMessage(opts, { from, to, message }) {
     }
 }
 
-module.exports = { sendMessage, SmtpError, readReply, connect, session, offersStartTls, TIMEOUT_MS };
+module.exports = { sendMessage, SmtpError, readReply, connect, session, command, upgrade, offersStartTls, TIMEOUT_MS };
