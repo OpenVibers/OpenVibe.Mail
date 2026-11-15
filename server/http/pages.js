@@ -195,6 +195,14 @@ function mountPages(app, { config }) {
         res.set('Cache-Control', 'private, no-store');
         res.type('html').send(providerAdminPage(config));
     });
+    // The icon every browser asks for (/favicon.ico), Shared's app icon, and the page for a path that is not here: the
+    // vhost passes only its listed paths and shows /404.html for the rest (browser check 11-15: nginx's bare 404 page had
+    // no language, and /favicon.ico was a 404 on every visit).
+    const icon = require('openvibe-shared/app-icon').favicon({ site: 'network' });
+    app.get(['/favicon.ico', '/favicon.svg'], (req, res) => res.set('Cache-Control', 'public, max-age=86400').type('image/svg+xml').send(icon));
+    app.get('/404.html', (req, res) => {
+        res.status(404).set('Content-Security-Policy', CSP).set('Cache-Control', 'no-store').type('html').send(notFoundPage());
+    });
     let html = null;
     app.get('/', (req, res) => {
         html = html || homePage(config);
@@ -204,4 +212,18 @@ function mountPages(app, { config }) {
     });
 }
 
-module.exports = { mountPages, homePage, inboxPage, providerAdminPage, siteIdentity, CSP, INBOX_CSP, asset };
+/** A path openvibe.email does not have: the site's look, a language, the way home. */
+function notFoundPage() {
+    return shell.page({
+        name: SITE_NAME,
+        lang: 'en',
+        title: `Not found · ${SITE_NAME}`,
+        siteName: SITE_NAME,
+        description: 'This page is not on openvibe.email.',
+        robots: 'noindex',
+        head: `<link rel="stylesheet" href="${ovServe.url('kit.css')}">\n<link rel="stylesheet" href="${asset('css/mail.css')}">`,
+        body: `<main id="main" class="ovk-empty" style="max-width:640px;margin:12vh auto;padding:0 16px"><h1>Not found</h1><p>This page is not on openvibe.email. It may have moved, or the link may be old.</p><p><a class="ovk-btn ovk-btn--primary" href="/">Go to openvibe.email</a></p></main>`,
+    });
+}
+
+module.exports = { mountPages, notFoundPage, homePage, inboxPage, providerAdminPage, siteIdentity, CSP, INBOX_CSP, asset };
