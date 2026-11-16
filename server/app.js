@@ -82,6 +82,9 @@ async function createApp(opts = {}) {
     const app = express();
     app.disable('x-powered-by');
     app.set('trust proxy', config.trustProxy);
+    // GET /metrics (loopback only: Prometheus on the host), the HTTP middleware first, process metrics and release_info.
+    const release = require('openvibe-shared/release').createRelease({ service: 'mail', root: ROOT });
+    const metrics = require('openvibe-shared/metrics').instrument(app, { service: 'mail', release: release.release });
 
     app.use(contracts.http.middleware());
     app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
@@ -102,7 +105,7 @@ async function createApp(opts = {}) {
 
     // GET /release.json (registry.release-manifest@1): the deployed commit, read at boot. Open tabs poll it through
     // the shared navbar's release-watch and pick up a new release without a hard refresh, as on every other site.
-    require('openvibe-shared/release').createRelease({ service: 'mail', root: ROOT }).mount(app);
+    release.mount(app, { registry: metrics.registry });
 
     // The machine-readable front door (SEO-2/SEO-3/SEO-33): /.well-known/agent.json, /openapi.json, /llms.txt and
     // /llms-full.txt. Public data only; no signed-in or admin page is named (server/http/discovery.js).
