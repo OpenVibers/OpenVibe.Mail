@@ -224,7 +224,3 @@ repository; Opus installs it on the host.
 
 AGPL-3.0-only, matching Stalwart Community. OpenVibe.Mail ships configuration and a Node service, not a modified
 Stalwart.
-
-<!-- versions:start -->
-- openvibe-contracts: v0.419.0
-<!-- versions:end -->
