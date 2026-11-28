@@ -7,7 +7,7 @@
   "runtime": "node 22, express, PostgreSQL 18 (openvibe-sdk/db), Stalwart Community 1.0.3 (AGPL-3.0-only), local filesystem blobs (S3 optional)",
   "port": 5250,
   "domain": "openvibe.email; receive-only MX. The API and the pages are public through nginx (deploy/nginx/openvibe.email.conf): a home page at /, the signed-in inbox at /inbox (and /inbox/settings), and the owner's provider panel at /admin/mail/providers.",
-  "contracts": "openvibe-contracts v0.449.0",
+  "contracts": "openvibe-contracts v0.454.0",
   "sdk": "openvibe-sdk v0.190.0",
   "shared": "openvibe-shared v4.337.0",
   "contractsProposed": [],
