@@ -78,6 +78,14 @@ function createDiscoveryRoutes({ config }) {
 
     r.get('/.well-known/agent.json', (_req, res) => res.set('Cache-Control', CACHE).json(manifest));
 
+    // robots.txt and sitemap.xml (11-28: the crawl found neither, only Cloudflare's content-signal comments): every
+    // crawler is welcome on the public page; a person's inbox, the owner's console and the API are not pages.
+    r.get('/robots.txt', (_req, res) => res.type('text/plain').set('Cache-Control', CACHE).send(seo.robotsTxt({
+        sitemaps: [`${base}/sitemap.xml`],
+        disallow: ['/inbox', '/admin/', '/api/', '/internal/'],
+    })));
+    r.get('/sitemap.xml', (_req, res) => res.type('application/xml').set('Cache-Control', CACHE).send(seo.sitemapXml([{ loc: `${base}/` }])));
+
     // GET /openapi.json (SEO-3): the service's own API as OpenAPI 3.1.
     r.get('/openapi.json', (_req, res) => {
         const doc = publicDocument();
