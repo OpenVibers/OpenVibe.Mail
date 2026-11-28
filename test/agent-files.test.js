@@ -42,6 +42,20 @@ test('the agent files describe only the public page and API', async (t) => {
     assert.strictEqual(agent.body.llmsFull, 'https://openvibe.email/llms-full.txt');
     assert.ok(!JSON.stringify(agent.body).includes('/inbox'), 'the manifest names no private page');
 
+    const robots = await s.get('/robots.txt');
+    assert.strictEqual(robots.status, 200);
+    assert.match(robots.headers.get('content-type'), /^text\/plain/);
+    assert.match(robots.text, /^User-agent: \*$/m);
+    assert.match(robots.text, /^Allow: \/$/m, 'every crawler may read the public page');
+    for (const privatePath of ['/inbox', '/admin/', '/api/']) assert.match(robots.text, new RegExp(`^Disallow: ${privatePath}$`, 'm'));
+    assert.match(robots.text, /^Sitemap: https:\/\/openvibe\.email\/sitemap\.xml$/m);
+
+    const map = await s.get('/sitemap.xml');
+    assert.strictEqual(map.status, 200);
+    assert.match(map.headers.get('content-type'), /xml/);
+    assert.ok(map.text.includes('<loc>https://openvibe.email/</loc>'), 'the sitemap lists the home page');
+    assert.ok(!map.text.includes('/inbox'), 'the sitemap names no private page');
+
     const doc = await s.get('/openapi.json');
     assert.strictEqual(doc.status, 200);
     assert.match(doc.headers.get('content-type'), /^application\/json/);

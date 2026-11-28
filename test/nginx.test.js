@@ -39,7 +39,7 @@ test('only the page and its files, the API, the machine answers and the sign-in 
         .sort();
     assert.deepStrictEqual(proxied, ['/', '^/(css|js|shared)/', '^/inbox(/[A-Za-z0-9_-]+)?$', '/api/health', '/api/ready', '/api/v1/', '/auth/', '/auth/me', '/release.json',
         // 11-09: the agent files, the owner's provider panel and the report page answered nginx's 404 though the app serves them.
-        '^/(llms\\.txt|llms-full\\.txt|openapi\\.json)$', '/.well-known/agent.json', '/admin/mail/providers', '^/report/[0-9a-f-]+$',
+        '^/(llms\\.txt|llms-full\\.txt|openapi\\.json|robots\\.txt|sitemap\\.xml)$', '/.well-known/agent.json', '/admin/mail/providers', '^/report/[0-9a-f-]+$',
         // 11-15 (browser check): the icon browsers ask for, and the internal 404 page shown in place of nginx's bare one.
         '^/favicon\\.(ico|svg)$', '/404.html'].sort());
 
